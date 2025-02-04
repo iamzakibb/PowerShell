@@ -1,10 +1,10 @@
 # Variables: update these with your actual values
-$serverName     = "yourserver.database.windows.net"  # Azure SQL Server FQDN
-$databaseName   = "codeninjas"                       # Database where user should be created
-$adminUser      = "yourAdminUser"                    # Admin login for the database server
-$adminPassword  = "yourAdminPassword"                # Admin login password
-$newUserName    = "ReadUser"                         # The new contained user to create
-$newUserPassword= "YourReadUserStrongPassword!"     # Password for the new user
+$serverName     = "" # Azure SQL Server FQDN
+$databaseName   = ""                       # Database where user should be created
+$adminUser      = ""                    # Admin login for the database server
+$adminPassword  = ""                # Admin login password
+$newUserName    = ""                         # The new contained user to create
+$newUserPassword= ""     # Password for the new user
 
 # Build the T-SQL script to create the user if it does not already exist
 $query = @"
@@ -16,11 +16,24 @@ END
 ALTER ROLE db_datareader ADD MEMBER [$newUserName];
 "@
 
-# Run the T-SQL script on the specified database
-Invoke-Sqlcmd -ServerInstance $serverName `
-              -Database $databaseName `
-              -Username $adminUser `
-              -Password $adminPassword `
-              -Query $query
+Write-Host "Executing query on server '$serverName', database '$databaseName':"
+Write-Host $query
+Write-Host "--------------------------------------------"
 
-Write-Host "User '$newUserName' has been created in database '$databaseName' with read-only access."
+try {
+    $result = Invoke-Sqlcmd -ServerInstance $serverName `
+                            -Database $databaseName `
+                            -Username $adminUser `
+                            -Password $adminPassword `
+                            -Query $query `
+                            -ErrorAction Stop `
+                            -Verbose
+
+    Write-Host "User '$newUserName' should now exist in database '$databaseName' with read-only access."
+}
+catch {
+    Write-Error "An error occurred: $($_.Exception.Message)"
+    if ($_.Exception.InnerException) {
+         Write-Error "Inner exception: $($_.Exception.InnerException.Message)"
+    }
+}
