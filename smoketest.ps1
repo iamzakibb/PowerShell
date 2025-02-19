@@ -1,11 +1,10 @@
-# Define the website to ping
-$website = "https://google.com"
 
-# Ping the website
+$website = ""
+
 if (Test-Connection -ComputerName (New-Object System.Uri($website)).Host -Count 4 -Quiet) {
     Write-Host "$website is reachable." -ForegroundColor Green
 
-    # Try to get the HTTP status code
+   
     try {
         $response = Invoke-WebRequest -Uri $website -UseBasicParsing
         Write-Host "HTTP Status Code: $($response.StatusCode)" -ForegroundColor Cyan
