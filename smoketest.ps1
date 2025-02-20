@@ -1,5 +1,5 @@
 
-$website = ""
+$website = "https://google.com"
 
 if (Test-Connection -ComputerName (New-Object System.Uri($website)).Host -Count 4 -Quiet) {
     Write-Host "$website is reachable." -ForegroundColor Green
