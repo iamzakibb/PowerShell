@@ -8,6 +8,7 @@ $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.G
 $headers = @{
     "Authorization" = "Basic $encodedCreds"
     "Content-Type"  = "application/json"
+    "Accept"        = "application/json"
 }
 
 try {
