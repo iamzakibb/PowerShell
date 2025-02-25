@@ -13,7 +13,7 @@ $headers = @{
 
 try {
     # Perform the API request (GET/POST as required)
-    $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
+    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
 
     # Validate response structure and capture ticket details
     if ($response -and $response.result) {
