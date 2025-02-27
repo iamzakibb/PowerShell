@@ -17,8 +17,8 @@ try {
 
     # Validate response structure and capture ticket details
     if ($response -and $response.result) {
-        $ticketNumber = $response.result.number
-        $sysID        = $response.result.sys_id
+        $ticketNumber = $response.result.number.value
+        $sysID        = $response.result.sys_id.value
 
         # Display the ticket number and sys_id
         Write-Host "Ticket created successfully."
