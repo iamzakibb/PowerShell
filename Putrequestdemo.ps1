@@ -8,7 +8,7 @@ if (-not $sysID) {
 }
 
 Write-Host "Using sys_id: $sysID"
-#
+
 $username   = "your-username"
 $password   = "your-password"
 $apiUrl     = "https://frsdev.servicenowservices.com/api/now/table/change_request/$sysID"
@@ -29,13 +29,8 @@ try {
   $response = Invoke-RestMethod -Uri $apiUrl -Method Put -Headers $headers -Body $body
   Write-Host "Update successful."
 
-  # Format JSON output into a table
-  if ($response.result -is [System.Collections.IDictionary]) {
-      $response.result.GetEnumerator() | Select-Object Key, Value | Format-Table -AutoSize
-  } else {
-      Write-Host "Unexpected response format:"
-      $response | ConvertTo-Json -Depth 3
-  }
+  # Simply display the JSON response as an object
+  $response | ConvertTo-Json -Depth 5 | ConvertFrom-Json
 }
 catch {
     Write-Host "Failed to update ticket '$ticketNumber'."
