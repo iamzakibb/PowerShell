@@ -1,5 +1,3 @@
-# Minimal PowerShell script to update a ServiceNow ticket state to "implement" using pipeline variables
-
 # Retrieve pipeline variables
 $sysID        = "$(sys_id)"
 $ticketNumber = "$(ticketNumber)"
@@ -10,12 +8,10 @@ if (-not $sysID) {
 }
 
 Write-Host "Using sys_id: $sysID"
-
-# ServiceNow details
-$instance   = "your-instance"
+#
 $username   = "your-username"
 $password   = "your-password"
-$apiUrl     = "https://$instance.service-now.com/api/now/table/change_request/$sysID"
+$apiUrl     = "https://frsdev.servicenowservices.com/api/now/table/change_request/$sysID"
 
 # Auth headers
 $encodedCreds = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$username`:$password"))
@@ -32,7 +28,14 @@ try {
   Write-Host "Updating ticket '$ticketNumber' (sys_id: $sysID) to 'implement'..."
   $response = Invoke-RestMethod -Uri $apiUrl -Method Put -Headers $headers -Body $body
   Write-Host "Update successful."
-  $response | ConvertTo-Json
+
+  # Format JSON output into a table
+  if ($response.result -is [System.Collections.IDictionary]) {
+      $response.result.GetEnumerator() | Select-Object Key, Value | Format-Table -AutoSize
+  } else {
+      Write-Host "Unexpected response format:"
+      $response | ConvertTo-Json -Depth 3
+  }
 }
 catch {
     Write-Host "Failed to update ticket '$ticketNumber'."
