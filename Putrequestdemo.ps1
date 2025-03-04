@@ -4,7 +4,12 @@
 $sysID        = "$(sys_id)"
 $ticketNumber = "$(ticketNumber)"
 
-if (-not $sysID) { Write-Host "sys_id missing." ; exit 1 }
+if (-not $sysID) { 
+    Write-Host "sys_id missing."
+    exit 1
+}
+
+Write-Host "Using sys_id: $sysID"
 
 # ServiceNow details
 $instance   = "your-instance"
@@ -30,6 +35,7 @@ try {
   $response | ConvertTo-Json
 }
 catch {
-  Write-Host "Failed to update ticket '$ticketNumber'. $($_.Exception.Message)"
-  exit 1
+    Write-Host "Failed to update ticket '$ticketNumber'."
+    Write-Host "Error details: $($_.Exception.Message)"
+    exit 1
 }
