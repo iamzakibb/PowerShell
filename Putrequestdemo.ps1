@@ -1,5 +1,5 @@
 # Retrieve pipeline variables
-$sysID        = "$(sys_ID)"
+$sysID = "$(SysID)"
 $ticketNumber = "$(ticketNumber)"
 
 if (-not $sysID) { 
