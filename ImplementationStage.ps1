@@ -1,5 +1,7 @@
-$artifactDir = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY "TicketData"
+$artifactDir = Join-Path $env:System_DefaultWorkingDirectory "TicketData"
 $sysidFile   = Join-Path $artifactDir "sysid.txt"
+
+# Read sysID from the file
 #$ticketFile  = Join-Path $artifactDir "ticketNumber.txt"
 
 if (-not (Test-Path $sysidFile)) {
