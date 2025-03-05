@@ -12,30 +12,31 @@ $headers = @{
 }
 
 try {
-    # Perform the API request (GET/POST as required)
+    # Perform the API request
     $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
 
-    # Validate response structure and capture ticket details
-    if ($response -and $response.result) {
+    # Validate response structure and fields
+    if ($response -and $response.result -and $response.result.number.value -and $response.result.sys_id.value) {
         $ticketNumber = $response.result.number.value
         $sysID        = $response.result.sys_id.value
 
-        # Display the ticket number and sys_id
+        # Display the ticket details
         Write-Host "Ticket created successfully."
         Write-Host "Ticket Number: $ticketNumber"
         Write-Host "Sys ID: $sysID"
 
         # Set pipeline variables for later stages
-       #Write-Host "##vso[task.setvariable variable=SysID;isOutput=true]$sysID"
-       #Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
-       # Ensure artifact staging directory exists
-        $buildDir = "$env:BUILD_ARTIFACTSTAGINGDIRECTORY"
+        # Write-Host "##vso[task.setvariable variable=SysID;isOutput=true]$sysID"
+        # Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
+
+        # Ensure artifact staging directory exists
+        $buildDir = $env:BUILD_ARTIFACTSTAGINGDIRECTORY
         if (!(Test-Path $buildDir)) {
-            New-Item -ItemType Directory -Path $buildDir -Force
+            New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
         }
         
         # Define file path
-        $artifactFile = "$buildDir\sysid.txt"
+        $artifactFile = Join-Path $buildDir "sysid.txt"
         
         # Write sys_id to file
         Set-Content -Path $artifactFile -Value $sysID
@@ -44,27 +45,21 @@ try {
         # Verify file existence
         if (Test-Path $artifactFile) {
             Write-Host "✅ sysid.txt successfully created at: $artifactFile"
-            # Output file content for debugging
-            Write-Host "File Content:"
-            Get-Content $artifactFile
+            Write-Host "File Content: $(Get-Content $artifactFile)"
         } else {
             Write-Host "❌ ERROR: sysid.txt was NOT created!"
             exit 1
         }
-
     }
-        else {
-        Write-Host "Unexpected response format. Please verify the API response."
-        # Optionally set the pipeline variables to default values
-        #Write-Host "##vso[task.setvariable variable=TicketNumber;]none"
-        #Write-Host "##vso[task.setvariable variable=SysID;]none"
+    else {
+        Write-Host "❌ Unexpected API response format. Missing required fields."
         exit 1
     }
 }
 catch {
-    Write-Host "An error occurred while making the API call: $($_.Exception.Message)"
-    # Optionally set the pipeline variables to default values on error
-    Write-Host "##vso[task.setvariable variable=TicketNumber;]none"
-    Write-Host "##vso[task.setvariable variable=SysID;]none"
+    Write-Host "❌ API call failed: $($_.Exception.Message)"
+    if ($_.ErrorDetails) {
+        Write-Host "Error details: $($_.ErrorDetails)"
+    }
     exit 1
 }
