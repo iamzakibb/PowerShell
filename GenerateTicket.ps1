@@ -26,14 +26,16 @@ try {
         Write-Host "Sys ID: $sysID"
 
         # Set pipeline variables for later stages
-       Write-Host "##vso[task.setvariable variable=SysID;isOutput=true]$sysID"
-       Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
+       #Write-Host "##vso[task.setvariable variable=SysID;isOutput=true]$sysID"
+       #Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
+       $buildDir = "$env:BUILD_ARTIFACTSTAGINGDIRECTORY"
+       Set-Content -Path "$buildDir\sysid.txt" -Value $sysID
     }
     else {
         Write-Host "Unexpected response format. Please verify the API response."
         # Optionally set the pipeline variables to default values
-        Write-Host "##vso[task.setvariable variable=TicketNumber;]none"
-        Write-Host "##vso[task.setvariable variable=SysID;]none"
+        #Write-Host "##vso[task.setvariable variable=TicketNumber;]none"
+        #Write-Host "##vso[task.setvariable variable=SysID;]none"
         exit 1
     }
 }
