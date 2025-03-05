@@ -26,8 +26,8 @@ try {
         Write-Host "Sys ID: $sysID"
 
         # Set pipeline variables for later stages
-        Write-Host "##vso[task.setvariable variable=TicketNumber;]$ticketNumber"
-        Write-Host "##vso[task.setvariable variable=SysID;]$sysID"
+       Write-Host "##vso[task.setvariable variable=SysID;isOutput=true]$sysID"
+       Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
     }
     else {
         Write-Host "Unexpected response format. Please verify the API response."
