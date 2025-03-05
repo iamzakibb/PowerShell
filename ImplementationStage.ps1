@@ -1,13 +1,20 @@
-# Retrieve pipeline variables
-$sysID = "$(SysID)"
-$ticketNumber = "$(ticketNumber)"
+$artifactDir = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY "TicketData"
+$sysidFile   = Join-Path $artifactDir "sysid.txt"
+#$ticketFile  = Join-Path $artifactDir "ticketNumber.txt"
 
-if (-not $sysID) { 
-    Write-Host "sys_id missing."
+if (-not (Test-Path $sysidFile)) {
+    Write-Host "Error: sysid.txt not found in artifact."
     exit 1
 }
+# if (-not (Test-Path $ticketFile)) {
+#     Write-Host "Warning: ticketNumber.txt not found. Proceeding without ticket number."
+# }
 
-Write-Host "Using sys_id: $sysID"
+$sysID        = Get-Content -Path $sysidFile
+# $ticketNumber = Get-Content -Path $ticketFile
+
+Write-Host "Retrieved sysID: $sysID"
+# Write-Host "Retrieved ticketNumber: $ticketNumber"
 
 $username   = "your-username"
 $password   = "your-password"
