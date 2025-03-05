@@ -28,7 +28,7 @@ try {
         # Set pipeline variables for later stages
        #Write-Host "##vso[task.setvariable variable=SysID;isOutput=true]$sysID"
        #Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
-       $buildDir = "$env:BUILD_ARTIFACTSTAGINGDIRECTORY"
+       $buildDir = "$env:BUILD_SOURCESDIRECTORY"  # or $env:System_DefaultWorkingDirectory
        Set-Content -Path "$buildDir\sysid.txt" -Value $sysID
     }
     else {
