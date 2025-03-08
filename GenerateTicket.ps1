@@ -30,7 +30,7 @@ try {
         # Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
 
         # Ensure artifact staging directory exists
-        $buildDir = $env:BUILD_ARTIFACTSTAGINGDIRECTORY
+        $buildDir = $env:SYSTEM_DEFAULTWORKINGDIRECTORY
         if (!(Test-Path $buildDir)) {
             New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
         }
