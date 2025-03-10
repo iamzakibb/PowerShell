@@ -1,28 +1,28 @@
-$artifactDir = Join-Path $env:System_DefaultWorkingDirectory "TicketData"
-$sysidFile   = Join-Path $artifactDir "sysid.txt"
 
-# Read sysID from the file
-#$ticketFile  = Join-Path $artifactDir "ticketNumber.txt"
+Install-Module VSTeam -Scope CurrentUser -Force
 
-if (-not (Test-Path $sysidFile)) {
-    Write-Host "Error: sysid.txt not found in artifact."
+Set-VSTeamAccount -Account "" -PersonalAccessToken "YOUR-PAT-HERE"
+
+
+$r = Get-VSTeamRelease -ProjectName "$(System.TeamProject)" -Id $(Release.ReleaseId) -Raw
+
+
+$sysID        = $r.variables.SysID.value
+$ticketNumber = $r.variables.TicketNumber.value
+
+if (-not $sysID) {
+    Write-Host "sys_id missing."
     exit 1
 }
-# if (-not (Test-Path $ticketFile)) {
-#     Write-Host "Warning: ticketNumber.txt not found. Proceeding without ticket number."
-# }
 
-$sysID        = Get-Content -Path $sysidFile
-# $ticketNumber = Get-Content -Path $ticketFile
+Write-Host "Using sys_id: $sysID"
 
-Write-Host "Retrieved sysID: $sysID"
-# Write-Host "Retrieved ticketNumber: $ticketNumber"
 
 $username   = "your-username"
 $password   = "your-password"
 $apiUrl     = "https://frsdev.servicenowservices.com/api/now/table/change_request/$sysID"
 
-# Auth headers
+
 $encodedCreds = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$username`:$password"))
 $headers = @{
   "Authorization" = "Basic $encodedCreds"
@@ -30,16 +30,15 @@ $headers = @{
   "Accept"        = "application/json"
 }
 
-# Update body
+
 $body = @{ "state" = "-1" } | ConvertTo-Json
 
 try {
-  Write-Host "Updating ticket '$ticketNumber' (sys_id: $sysID) to 'implement'..."
-  $response = Invoke-RestMethod -Uri $apiUrl -Method Put -Headers $headers -Body $body
-  Write-Host "Update successful."
+    Write-Host "Updating ticket '$ticketNumber' (sys_id: $sysID) to 'implement'..."
+    $response = Invoke-RestMethod -Uri $apiUrl -Method Put -Headers $headers -Body $body
+    Write-Host "Update successful."
 
-  # Simply display the JSON response as an object
-  $response | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+    $response | ConvertTo-Json -Depth 5 | ConvertFrom-Json
 }
 catch {
     Write-Host "Failed to update ticket '$ticketNumber'."
