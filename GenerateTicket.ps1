@@ -1,9 +1,14 @@
-# Define variables
-$apiUrl   = "https://api.example.com/resource" 
-$username = "your-username"                    
-$password = "your-password"                    
 
-# Create Basic Auth header
+Install-Module VSTeam -Scope CurrentUser -Force
+
+Set-VSTeamAccount -Account "ORGnamehere" -PersonalAccessToken "YOUR-PAT-HERE"
+
+
+$apiUrl   = "https://api.example.com/resource"
+$username = "your-username"
+$password = "your-password"
+
+
 $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$username`:$password"))
 $headers = @{
     "Authorization" = "Basic $encodedCreds"
@@ -12,54 +17,34 @@ $headers = @{
 }
 
 try {
-    # Perform the API request
+    
     $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers
 
-    # Validate response structure and fields
-    if ($response -and $response.result -and $response.result.number.value -and $response.result.sys_id.value) {
-        $ticketNumber = $response.result.number.value
-        $sysID        = $response.result.sys_id.value
+   
+    if ($response -and $response.result) {
+        $ticketNumber = $response.result.number
+        $sysID        = $response.result.sys_id
 
-        # Display the ticket details
         Write-Host "Ticket created successfully."
         Write-Host "Ticket Number: $ticketNumber"
         Write-Host "Sys ID: $sysID"
 
-        # Set pipeline variables for later stages
-        # Write-Host "##vso[task.setvariable variable=SysID;isOutput=true]$sysID"
-        # Write-Host "##vso[task.setvariable variable=TicketNumber;isOutput=true]$ticketNumber"
+        
+        $r = Get-VSTeamRelease -ProjectName "$(System.TeamProject)" -Id $(Release.ReleaseId) -Raw
 
-        # Ensure artifact staging directory exists
-        $buildDir = $env:SYSTEM_DEFAULTWORKINGDIRECTORY
-        if (!(Test-Path $buildDir)) {
-            New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
-        }
         
-        # Define file path
-        $artifactFile = Join-Path $buildDir "sysid.txt"
+        $r.variables | Add-Member -MemberType NoteProperty -Name "SysID" -Value ([PSCustomObject]@{ value = $sysID })
+        $r.variables | Add-Member -MemberType NoteProperty -Name "TicketNumber" -Value ([PSCustomObject]@{ value = $ticketNumber })
+
         
-        # Write sys_id to file
-        Set-Content -Path $artifactFile -Value $sysID
-        Write-Host "Sys ID written to file: $artifactFile"
-        
-        # Verify file existence
-        if (Test-Path $artifactFile) {
-            Write-Host "✅ sysid.txt successfully created at: $artifactFile"
-            Write-Host "File Content: $(Get-Content $artifactFile)"
-        } else {
-            Write-Host "❌ ERROR: sysid.txt was NOT created!"
-            exit 1
-        }
+        Update-VSTeamRelease -ProjectName "$(System.TeamProject)" -Id $(Release.ReleaseId) -Release $r -Force
     }
     else {
-        Write-Host "❌ Unexpected API response format. Missing required fields."
+        Write-Host "Unexpected response format. Please verify the API response."
         exit 1
     }
 }
 catch {
-    Write-Host "❌ API call failed: $($_.Exception.Message)"
-    if ($_.ErrorDetails) {
-        Write-Host "Error details: $($_.ErrorDetails)"
-    }
+    Write-Host "An error occurred while making the API call: $($_.Exception.Message)"
     exit 1
 }
