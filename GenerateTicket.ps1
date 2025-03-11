@@ -22,8 +22,8 @@ try {
 
    
     if ($response -and $response.result) {
-        $ticketNumber = $response.result.number
-        $sysID        = $response.result.sys_id
+        $ticketNumber = $response.result.number.value
+        $sysID        = $response.result.sys_id.value
 
         Write-Host "Ticket created successfully."
         Write-Host "Ticket Number: $ticketNumber"
