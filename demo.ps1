@@ -72,7 +72,7 @@ $updateBody = @{
 } | ConvertTo-Json -Depth 3
 
 # Azure DevOps REST API Endpoint for Updating Release Variables
-$updateUrl = "https://tfs.clev.frb.org/$orgName/$project/_apis/release/releases/$releaseId?api-version=7.0"
+$updateUrl = "https://vsrm.dev.azure.com/$orgName/$project/_apis/release/releases/$releaseId?api-version=7.0"
 
 # Call Azure DevOps API to Update Release Variables
 try {
