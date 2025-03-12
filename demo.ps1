@@ -63,14 +63,20 @@ catch {
     exit 1
 }
 
-# Construct JSON Payload for Azure DevOps REST API
 $updateBody = @{
     variables = @{
-        "SysID" = @{ value = $sysID }
-        "TicketNumber" = @{ value = $ticketNumber }
+        "SysID" = @{
+            value = "$sysID"
+            isSecret = "false"
+            isReadOnly = "false"
+        }
+        "TicketNumber" = @{
+            value = "$ticketNumber"
+             isSecret = "false"
+             isReadOnly = "false"
+        }
     }
 } | ConvertTo-Json -Depth 3
-
 # Azure DevOps REST API Endpoint for Updating Release Variables
 $updateUrl = "https://tfs.clev.frb.org/$orgName/$project/_apis/release/releases?/$releaseId?api-version=7.1"
 
