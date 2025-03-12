@@ -2,7 +2,7 @@
 $orgName    = "ORGnamehere"
 $project    = "$(System.TeamProject)"
 $releaseId  = "$(Release.ReleaseId)"
-$pat        = "$(AZURE_DEVOPS_PAT)"  # PAT stored as a pipeline variable
+$pat        = "PAT_TOKEN_HERE"  # PAT stored as a pipeline variable
 
 # Encode PAT for Authentication
 $patToken   = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
@@ -72,7 +72,7 @@ $updateBody = @{
 } | ConvertTo-Json -Depth 3
 
 # Azure DevOps REST API Endpoint for Updating Release Variables
-$updateUrl = "https://vsrm.dev.azure.com/$orgName/$project/_apis/release/releases/$releaseId?api-version=7.0"
+$updateUrl = "https://tfs.clev.frb.org/$orgName/$project/_apis/release/releases/$releaseId?api-version=7.0"
 
 # Call Azure DevOps API to Update Release Variables
 try {
