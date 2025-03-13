@@ -4,6 +4,7 @@ $orgname = "YOURORGNAMEHERE"
 $apiUrl   = "https://api.example.com/resource"
 $username = "your-username"
 $password = "your-password"
+$variableGroupId = "VARGROUP_ID_HERE"
 $authHeader = @{Authorization = "Bearer $pat"}
 $projectID = "$(System.TeamProjectId)"
 $projectName = "$(System.TeamProject)"
@@ -71,7 +72,7 @@ $body = @{
 # Update Variable in Azure DevOps
 try {
     Write-Host "Updating Azure DevOps Variable Group with Sys ID..."
-    Invoke-RestMethod -Uri "https://dev.azure.com/$orgname/$projectName/_apis/distributedtask/variablegroups/2?api-version=7.2-preview.2" `
+    Invoke-RestMethod -Uri "https://dev.azure.com/$orgname/$projectName/_apis/distributedtask/variablegroups/$variableGroupId?api-version=7.2-preview.2" `
         -Method Put -Body $body -Headers $authHeader -ContentType "application/json"
 
     Write-Host "✅ Successfully updated variable group with Sys ID: $sysID"
