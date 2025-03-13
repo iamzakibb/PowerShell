@@ -7,7 +7,7 @@ $pat = "PATTOKENHERE"
 $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$($pat)"))
 
 # Define API URL
-$uri = "https://dev.azure.com/$organization/_apis/projects?api-version=7.1-preview.4"
+$uri = "https://tfs.clev.frb.org/$organization/_apis/projects?api-version=7.1-preview.4"
 
 # Invoke REST API
 $response = Invoke-RestMethod -Uri $uri -Headers @{Authorization=("Basic {0}" -f $base64AuthInfo)} -Method Get
