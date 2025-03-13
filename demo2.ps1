@@ -1,12 +1,12 @@
 
-$pat = "3izhbKBUHwjQssuKzJ8TKj69VTS3YrUHeaESbwkBw6PWiQxqZBnwJQQJ99BCACAAAAAAAAAAAAASAZDO2JvU"
-$authHeader = @{Authorization = "Bearer $pat"}
-$projectID = "$(System.TeamProjectId)"
+$pat = "PAT_TOKEN_HERE"
 $orgname = "YOURORGNAMEHERE"
-$projectName = "$(System.TeamProject)"
 $apiUrl   = "https://api.example.com/resource"
 $username = "your-username"
 $password = "your-password"
+$authHeader = @{Authorization = "Bearer $pat"}
+$projectID = "$(System.TeamProjectId)"
+$projectName = "$(System.TeamProject)"
 
 
 $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$username`:$password"))
