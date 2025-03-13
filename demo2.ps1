@@ -4,9 +4,9 @@ $orgname = "YOURORGNAMEHERE"
 $apiUrl   = "https://api.example.com/resource"
 $username = "your-username"
 $password = "your-password"
+$projectID = "PROJECTIDHERE"
+$projectName = "PROJECTNAMEHERE"
 $authHeader = @{Authorization = "Bearer $pat"}
-$projectID = "$(System.TeamProjectId)"
-$projectName = "$(System.TeamProject)"
 
 
 $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$username`:$password"))

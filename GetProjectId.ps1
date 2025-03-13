@@ -1,7 +1,7 @@
 # Define variables
 $organization = "yasirmushtaq7" # Replace with your Azure DevOps organization name
 $projectName = "yasir_mushtaq7" # Replace with your project name
-$pat = "3izhbKBUHwjQssuKzJ8TKj69VTS3YrUHeaESbwkBw6PWiQxqZBnwJQQJ99BCACAAAAAAAAAAAAASAZDO2JvU" 
+$pat = "PATTOKENHERE" 
 
 # Encode PAT for authentication
 $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$($pat)"))
