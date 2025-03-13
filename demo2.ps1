@@ -50,8 +50,8 @@ $body = @{
     type = "Vsts"
     variables = @{
         sys_id = @{
-            isSecret = $false
-            isReadOnly = $false
+            isSecret = "false"
+            isReadOnly = "false"
             value = "$sysID" 
         }
     }
@@ -70,8 +70,13 @@ $body = @{
 # Update Variable in Azure DevOps
 try {
     Write-Host "Updating Azure DevOps Variable Group with Sys ID..."
-    Invoke-RestMethod -Uri "https://tfs.clev.frb.org/$orgname/$projectName/_apis/distributedtask/variablegroups/183?api-version=7.1" 
-        -Method Put -Body $body -Headers $authHeader -ContentType "application/json"
+    Invoke-RestMethod -Uri "https://tfs.clev.frb.org/$orgname/$projectName/_apis/distributedtask/variablegroups/183?api-version=7.1" `
+    -Method Put `
+    -Body $body `
+    -Headers $authHeader `
+    -ContentType "application/json"
+
+ 
 
     Write-Host "✅ Successfully updated variable group with Sys ID: $sysID"
 }
