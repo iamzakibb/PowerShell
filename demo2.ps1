@@ -51,8 +51,8 @@ $body = @{
     type = "Vsts"
     variables = @{
         sys_id = @{
-            isSecret = "false"
-            isReadOnly = "false"
+            isSecret = $false
+            isReadOnly = $false
             value = "$sysID" 
         }
     }
