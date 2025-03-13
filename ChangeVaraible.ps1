@@ -1,4 +1,4 @@
-$pat = "3izhbKBUHwjQssuKzJ8TKj69VTS3YrUHeaESbwkBw6PWiQxqZBnwJQQJ99BCACAAAAAAAAAAAAASAZDO2JvU"
+$pat = ""
 $authHeader = @{Authorization = "Bearer $pat"}
 $projectID  = "ba259a5c-a105-49a5-a371-cf83d0abbfbc"
 
