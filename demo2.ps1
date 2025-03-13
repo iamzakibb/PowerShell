@@ -30,7 +30,9 @@ try {
     # Extract Sys ID from API Response
     if ($response -and $response.result) {
         $sysID = $response.result.sys_id.value
+        $ticketNumber = $response.result.number.value
         Write-Host "✅ Ticket created successfully. Sys ID: $sysID"
+        Write-Host "✅ Ticket created successfully. TicketNumber : $ticketNumber"
     }
     else {
         Write-Host "⚠️ Unexpected API response format."
