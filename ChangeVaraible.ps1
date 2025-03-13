@@ -1,8 +1,10 @@
 $pat = ""
 $orgname= ""
 $projectName = ""
-$authHeader = @{Authorization = "Bearer $pat"}
 $projectID  = "ba259a5c-a105-49a5-a371-cf83d0abbfbc"
+$base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+$authHeader = @{Authorization = "Basic $base64AuthInfo"}
+
 
 $body = @{
       description = "Variable Group"
