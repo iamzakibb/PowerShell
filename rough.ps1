@@ -40,7 +40,7 @@ $headers = @{
 $body = @{ "state" = "-1" } | ConvertTo-Json
 
 try {
-  Write-Host "Updating ticket (sys_id: $sys_id) to 'implement'..."
+  Write-Host "Updating ticket '$ticketNumber' (sys_id: $sys_id) to 'implement'..."
   $response = Invoke-RestMethod -Uri $apiUrl -Method Put -Headers $headers -Body $body
   Write-Host "Update successful."
 
@@ -48,7 +48,7 @@ try {
   $response | ConvertTo-Json -Depth 5 | ConvertFrom-Json
 }
 catch {
-    Write-Host "Failed to update ticket ."
+    Write-Host "Failed to update ticket '$ticketNumber'."
     Write-Host "Error details: $($_.Exception.Message)"
     exit 1
 }
