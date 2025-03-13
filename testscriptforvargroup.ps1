@@ -5,13 +5,13 @@
 # Define Variables
 $organization      = "yasirmushtaq7"           # Your Azure DevOps organization
 $project           = "yasir_mushtaq7"            # Your project name
-$variableGroupId   = "2"                       # The Variable Group ID to update
-$variableGroupName = "Group"                   # The name of the Variable Group
+$variableGroupId   = "2"                     # The Variable Group ID to update
+$variableGroupName = "Sys_id"                   # The name of the Variable Group
 $description       = "Group Variables"         # Description for the Variable Group
-$variableName      = "MY_VAR"                  # Name of the variable to add/update
+$variableName      = "sys_id"                  # Name of the variable to add/update
 $newValue          = "UpdatedValue"            # The new value for the variable
-$projectID         = "YOUR_PROJECT_ID"         # Your project's GUID (update this!)
-$pat               = "YOUR_PERSONAL_ACCESS_TOKEN"  # Your Personal Access Token
+$projectID         = "ba259a5c-a105-49a5-a371-cf83d0abbfbc"         # Your project's GUID (update this!)
+$pat             = "3izhbKBUHwjQssuKzJ8TKj69VTS3YrUHeaESbwkBw6PWiQxqZBnwJQQJ99BCACAAAAAAAAAAAAASAZDO2JvU"  # Your Personal Access Token
 
 # Build Authentication Header (using Bearer token as in your sample)
 $authHeader = @{ Authorization = "Bearer $pat" }
@@ -23,8 +23,8 @@ $body = @{
     type        = "Vsts"
     variables   = @{
         $variableName = @{
-            isSecret   = "false"
-            isReadOnly = "false"
+            isSecret   = $false
+            isReadOnly = $false
             value      = $newValue
         }
     }
@@ -41,7 +41,7 @@ $body = @{
 } | ConvertTo-Json -Depth 10
 
 # Build the API URL (note: the URL includes both organization and project)
-$uri = "https://dev.azure.com/$organization/$project/_apis/distributedtask/variablegroups/$variableGroupId?api-version=7.2-preview.2"
+$uri = "https://dev.azure.com/$organization/$project/_apis/distributedtask/variablegroups/2?api-version=7.1"
 
 # Execute the PUT request to update the variable group
 Invoke-RestMethod -Uri $uri -Method Put -Body $body -Headers $authHeader -ContentType "application/json"
