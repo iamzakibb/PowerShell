@@ -6,9 +6,8 @@ $username = "your-username"
 $password = "your-password"
 $projectID = "PROJECTIDHERE"
 $projectName = "PROJECTNAMEHERE"
-$authHeader = @{Authorization = "Bearer $pat"}
-
-
+$base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+$authHeader = @{Authorization = "Basic $base64AuthInfo"}
 $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$username`:$password"))
 $headers = @{
     "Authorization" = "Basic $encodedCreds"
@@ -71,7 +70,7 @@ $body = @{
 # Update Variable in Azure DevOps
 try {
     Write-Host "Updating Azure DevOps Variable Group with Sys ID..."
-    Invoke-RestMethod -Uri "https://tfs.clev.frb.org/$orgname/$projectName/_apis/distributedtask/variablegroups/183?api-version=7.2-preview.2" 
+    Invoke-RestMethod -Uri "https://tfs.clev.frb.org/$orgname/$projectName/_apis/distributedtask/variablegroups/183?api-version=7.1" 
         -Method Put -Body $body -Headers $authHeader -ContentType "application/json"
 
     Write-Host "✅ Successfully updated variable group with Sys ID: $sysID"
