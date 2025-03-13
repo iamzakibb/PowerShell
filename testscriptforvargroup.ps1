@@ -11,7 +11,7 @@ $description       = "Group Variables"         # Description for the Variable Gr
 $variableName      = "sys_id"                  # Name of the variable to add/update
 $newValue          = "UpdatedValue"            # The new value for the variable
 $projectID         = "ba259a5c-a105-49a5-a371-cf83d0abbfbc"         # Your project's GUID (update this!)
-$pat             = "3izhbKBUHwjQssuKzJ8TKj69VTS3YrUHeaESbwkBw6PWiQxqZBnwJQQJ99BCACAAAAAAAAAAAAASAZDO2JvU"  # Your Personal Access Token
+$pat             = ""  # Your Personal Access Token
 
 # Build Authentication Header (using Bearer token as in your sample)
 $authHeader = @{ Authorization = "Bearer $pat" }
