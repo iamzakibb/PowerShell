@@ -4,7 +4,7 @@ $orgname = "YOURORGNAMEHERE"
 $apiUrl   = "https://api.example.com/resource"
 $username = "your-username"
 $password = "your-password"
-$variableGroupId = "VARGROUP_ID_HERE"
+$variableGroupId = "183"
 $authHeader = @{Authorization = "Bearer $pat"}
 $projectID = "$(System.TeamProjectId)"
 $projectName = "$(System.TeamProject)"
