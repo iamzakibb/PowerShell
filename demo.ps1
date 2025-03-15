@@ -1,20 +1,19 @@
-Install-Module VSTeam -Scope CurrentUser -Force
+# Set Azure DevOps Variables
+$orgName    = "ORGnamehere"
+$pat        = "PAT_TOKEN_HERE"  # PAT stored as a pipeline variable
+$project    = "$(System.TeamProject)"
+$releaseId  = "$(Release.ReleaseId)"
 
-# Set VSTeam Account
-try {
-    Set-VSTeamAccount -Account "ORGnamehere" -PersonalAccessToken "YOUR-PAT-HERE"
-}
-catch {
-    Write-Host "Error setting VSTeam account: $($_.Exception.Message)"
-    exit 1
-}
+# Encode PAT for Authentication
+$patToken   = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+$authHeader = @{ "Authorization" = "Basic $patToken"; "Content-Type" = "application/json" }
 
-# API Credentials
+# API Credentials for External Service
 $apiUrl   = "https://api.example.com/resource"
 $username = "your-username"
 $password = "your-password"
 
-# Encode Credentials
+# Encode API Credentials
 $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$username`:$password"))
 $headers = @{
     "Authorization" = "Basic $encodedCreds"
@@ -22,7 +21,7 @@ $headers = @{
     "Accept"        = "application/json"
 }
 
-# Call API with Error Handling
+# Call External API
 try {
     Write-Host "Making API call to: $apiUrl"
     $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -ErrorVariable apiError -ErrorAction SilentlyContinue
@@ -64,27 +63,32 @@ catch {
     exit 1
 }
 
-# Get VSTeam Release Info
+$updateBody = @{
+    variables = @{
+        "SysID" = @{
+            value = "$sysID"
+            isSecret = "false"
+            isReadOnly = "false"
+        }
+        "TicketNumber" = @{
+            value = "$ticketNumber"
+             isSecret = "false"
+             isReadOnly = "false"
+        }
+    }
+} | ConvertTo-Json -Depth 3
+# Azure DevOps REST API Endpoint for Updating Release Variables
+$updateUrl = "https://tfs.clev.frb.org/$orgName/$project/_apis/release/releases?/$releaseId?api-version=7.1"
+
+# Call Azure DevOps API to Update Release Variables
 try {
-    Write-Host "Fetching VSTeam Release details..."
-    $r = Get-VSTeamRelease -ProjectName "$(System.TeamProject)" -Id $(Release.ReleaseId) -Raw
+    Write-Host "Updating Azure DevOps Release Variables..."
+    Invoke-RestMethod -Uri $updateUrl -Method Put -Headers $authHeader -Body $updateBody
+
+    Write-Host "✅ Successfully updated release variables in Azure DevOps."
 }
 catch {
-    Write-Host "Error fetching VSTeam Release: $($_.Exception.Message)"
-    exit 1
-}
-
-# Add Variables to Release
-$r.variables | Add-Member -MemberType NoteProperty -Name "SysID" -Value ([PSCustomObject]@{ value = $sysID })
-$r.variables | Add-Member -MemberType NoteProperty -Name "TicketNumber" -Value ([PSCustomObject]@{ value = $ticketNumber })
-
-# Update VSTeam Release
-try {
-    Write-Host "Updating VSTeam Release with new variables..."
-    Update-VSTeamRelease -ProjectName "$(System.TeamProject)" -Id $(Release.ReleaseId) -Release $r -Force
-}
-catch {
-    Write-Host "Error updating VSTeam Release: $($_.Exception.Message)"
+    Write-Host "❌ Failed to update Azure DevOps Release Variables: $($_.Exception.Message)"
     exit 1
 }
 
