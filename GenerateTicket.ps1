@@ -1,20 +1,13 @@
-Install-Module VSTeam -Scope CurrentUser -Force
 
-# Set VSTeam Account
-try {
-    Set-VSTeamAccount -Account "ORGnamehere" -PersonalAccessToken "YOUR-PAT-HERE"
-}
-catch {
-    Write-Host "Error setting VSTeam account: $($_.Exception.Message)"
-    exit 1
-}
-
-# API Credentials
+$pat = "PAT_TOKEN_HERE"
+$orgname = "YOURORGNAMEHERE"
 $apiUrl   = "https://api.example.com/resource"
 $username = "your-username"
 $password = "your-password"
-
-# Encode Credentials
+$projectID = "PROJECTIDHERE"
+$projectName = "PROJECTNAMEHERE"
+$base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+$authHeader = @{Authorization = "Basic $base64AuthInfo"}
 $encodedCreds = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$username`:$password"))
 $headers = @{
     "Authorization" = "Basic $encodedCreds"
@@ -22,10 +15,13 @@ $headers = @{
     "Accept"        = "application/json"
 }
 
-# Call API with Error Handling
+$body = @{ 
+    "requested_by" = "Malinda Ibe"
+} | ConvertTo-Json -Depth 2
+
 try {
     Write-Host "Making API call to: $apiUrl"
-    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -ErrorVariable apiError -ErrorAction SilentlyContinue
+    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body -ErrorVariable apiError -ErrorAction SilentlyContinue
 
     if ($apiError) {
         Write-Host "API Request Failed!"
@@ -34,57 +30,63 @@ try {
         exit 1
     }
 
-    # Check if response contains expected fields
+    # Extract Sys ID from API Response
     if ($response -and $response.result) {
+        $sysID = $response.result.sys_id.value
         $ticketNumber = $response.result.number.value
-        $sysID        = $response.result.sys_id.value
-
-        Write-Host "✅ Ticket created successfully."
-        Write-Host "Ticket Number: $ticketNumber"
-        Write-Host "Sys ID: $sysID"
+        Write-Host "✅ Ticket created successfully. Sys ID: $sysID"
+        Write-Host "✅ Ticket created successfully. TicketNumber : $ticketNumber"
     }
     else {
-        Write-Host "⚠️ Unexpected API response format. Please verify the API response structure."
+        Write-Host "⚠️ Unexpected API response format."
         Write-Host "Raw Response: $response"
         exit 1
     }
 }
 catch {
     Write-Host "❌ API Call Failed: $($_.Exception.Message)"
-    if ($_.Exception.Response) {
-        $statusCode = $_.Exception.Response.StatusCode.Value__
-        Write-Host "HTTP Status Code: $statusCode"
+    exit 1
+}
 
-        # Read the response body for detailed error message
-        $responseStream = $_.Exception.Response.GetResponseStream()
-        $reader = New-Object System.IO.StreamReader($responseStream)
-        $errorResponse = $reader.ReadToEnd()
-        Write-Host "Error Response: $errorResponse"
+# Construct JSON Body to Update Variable
+$body = @{
+    description = "Variable Group"
+    name = "Sys_id"
+    type = "Vsts"
+    variables = @{
+        sys_id = @{
+            isSecret = "false"
+            isReadOnly = "false"
+            value = "$sysID" 
+        }
     }
-    exit 1
-}
+    variableGroupProjectReferences = @(
+        @{
+            name = "Sys_id"
+            description = "Variable Group"
+            projectReference = @{
+                id = $projectID
+                name = $projectName
+            }
+        }
+    )
+} | ConvertTo-Json -Depth 10
 
-# Get VSTeam Release Info
+# Update Variable in Azure DevOps
 try {
-    Write-Host "Fetching VSTeam Release details..."
-    $r = Get-VSTeamRelease -ProjectName "$(System.TeamProject)" -Id $(Release.ReleaseId) -Raw
+    Write-Host "Updating Azure DevOps Variable Group with Sys ID..."
+    Invoke-RestMethod -Uri "https://tfs.clev.frb.org/$orgname/$projectName/_apis/distributedtask/variablegroups/183?api-version=7.1" `
+    -Method Put `
+    -Body $body `
+    -Headers $authHeader `
+    -ContentType "application/json"
+
+ 
+
+    Write-Host "✅ Successfully updated variable group with Sys ID: $sysID"
 }
 catch {
-    Write-Host "Error fetching VSTeam Release: $($_.Exception.Message)"
-    exit 1
-}
-
-# Add Variables to Release
-$r.variables | Add-Member -MemberType NoteProperty -Name "SysID" -Value ([PSCustomObject]@{ value = $sysID })
-$r.variables | Add-Member -MemberType NoteProperty -Name "TicketNumber" -Value ([PSCustomObject]@{ value = $ticketNumber })
-
-# Update VSTeam Release
-try {
-    Write-Host "Updating VSTeam Release with new variables..."
-    Update-VSTeamRelease -ProjectName "$(System.TeamProject)" -Id $(Release.ReleaseId) -Release $r -Force
-}
-catch {
-    Write-Host "Error updating VSTeam Release: $($_.Exception.Message)"
+    Write-Host "❌ Failed to update Azure DevOps Variable Group: $($_.Exception.Message)"
     exit 1
 }
 

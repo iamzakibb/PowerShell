@@ -14,11 +14,13 @@ $headers = @{
     "Content-Type"  = "application/json"
     "Accept"        = "application/json"
 }
-
+$body = @{ 
+    "requested_by" = "Malinda Ibe"
+} | ConvertTo-Json -Depth 2
 
 try {
     Write-Host "Making API call to: $apiUrl"
-    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -ErrorVariable apiError -ErrorAction SilentlyContinue
+    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body -ErrorVariable apiError -ErrorAction SilentlyContinue
 
     if ($apiError) {
         Write-Host "API Request Failed!"
