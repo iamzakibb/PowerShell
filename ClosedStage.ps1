@@ -36,11 +36,21 @@ $headers = @{
   "Accept"        = "application/json"
 }
 
-# Update body
-$body = @{ "state" = "-1" } | ConvertTo-Json
+$startDate = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
+
+$endDate = (Get-Date).AddDays(15).ToString("MM/dd/yyyy HH:mm:ss")
+$body = @{ 
+  "state"       = "3"
+  "close_code"  = "Successfull"
+  "close_notes" = "Sample closed notes"
+  "start_date"  = $startDate
+  "end_date"    = $endDate
+
+} | ConvertTo-Json -Depth 2
+
 
 try {
-  Write-Host "Updating ticket (sys_id: $sys_id) to 'implement'..."
+  Write-Host "Updating ticket (sys_id: $sys_id) to 'Close'..."
   $response = Invoke-RestMethod -Uri $apiUrl -Method Put -Headers $headers -Body $body
   Write-Host "Update successful."
 
