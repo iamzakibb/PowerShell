@@ -14,9 +14,13 @@ $headers = @{
     "Content-Type"  = "application/json"
     "Accept"        = "application/json"
 }
+$startDate = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
 
+$endDate = (Get-Date).AddDays(15).ToString("MM/dd/yyyy HH:mm:ss")
 $body = @{ 
     "requested_by" = "Malinda Ibe"
+    "start_date"  = $startDate
+    "end_date"    = $endDate
 } | ConvertTo-Json -Depth 2
 
 try {
