@@ -18,7 +18,7 @@ $startDate = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
 
 $endDate = (Get-Date).AddDays(7).ToString("MM/dd/yyyy HH:mm:ss")
 $body = @{ 
-    "requested_by" = [string]::new("Malinda Ibe")
+    "requested_by" = $(requested_by)
     "start_date"  = $startDate
     "end_date"    = $endDate
 } | ConvertTo-Json -Depth 2
