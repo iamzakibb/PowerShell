@@ -1,9 +1,9 @@
 
-$pat = "PAT_TOKEN_HERE"
+$pat = "$(pat)"
 $orgname = "YOURORGNAMEHERE"
 $apiUrl   = "https://api.example.com/resource"
-$username = "your-username"
-$password = "your-password"
+$username = "$(username)"
+$password = "$(password)"
 $projectID = "PROJECTIDHERE"
 $projectName = "PROJECTNAMEHERE"
 $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
