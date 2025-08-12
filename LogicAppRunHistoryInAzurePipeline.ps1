@@ -15,7 +15,7 @@ try {
     Write-Host "##[section]Successfully connected to Azure"
 
     # Set subscription context if specified
-    if ($subscriptionName) {
+    if ($subscriptionName) { 
         Set-AzContext -Subscription $subscriptionName -ErrorAction Stop | Out-Null
         Write-Host "##[section]Using subscription: $((Get-AzContext).Subscription.Name)"
     }
