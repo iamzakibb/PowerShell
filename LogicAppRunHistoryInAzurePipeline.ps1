@@ -5,6 +5,18 @@ $subscriptionName = "$(AzureSubscription)"
 $servicePrincipalId = "$(ServicePrincipalId)"
 $servicePrincipalKey = "$(ServicePrincipalKey)"
 $tenantId = "$(TenantId)"
+# Remove old AzureRM modules if present
+if (Get-Module -ListAvailable -Name AzureRM*) {
+    Write-Host "Removing old AzureRM modules..."
+    Uninstall-AzureRm -Force -ErrorAction SilentlyContinue
+}
+
+# Install Az module (latest version)
+Write-Host "Installing Az module..."
+Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force -AllowClobber
+
+# Import Az.Accounts to ensure Connect-AzAccount works
+Import-Module Az.Accounts -ErrorAction Stop
 
 try {
     # Connect to Azure using Service Principal
