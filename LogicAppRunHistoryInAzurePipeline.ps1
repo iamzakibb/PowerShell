@@ -67,7 +67,7 @@ function get-func {
     }
 }
 
-# Call bootstrap
+# Call
 try {
     get-func
 } catch {
