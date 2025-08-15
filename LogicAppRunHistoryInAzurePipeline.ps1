@@ -6,14 +6,14 @@ $servicePrincipalId= "$(ServicePrincipalId)"
 $servicePrincipalKey= "$(ServicePrincipalKey)"
 $tenantId          = "$(TenantId)"
 
-# ---- Bootstrap Az modules: unload conflicting modules, uninstall AzureRM if present, then import Az ----
+# ---- Bootstrap: unload conflicting modules, uninstall AzureRM if present (no Az import) ----
 $ProgressPreference = 'SilentlyContinue'
 
-function Prepare-Az {
-    Write-Host "Preparing PowerShell session for Az modules..."
+function Get-Environment {
+    Write-Host "Preparing session: removing loaded Az/AzureRM modules and attempting AzureRM uninstall (no Az import)."
 
     # Remove any currently loaded Az/AzureRM modules from the session (best-effort)
-    $loaded = Get-Module -Name Az*,AzureRM* -ErrorAction SilentlyContinue
+    $loaded = Get-Module -Name AzureRM* -ErrorAction SilentlyContinue
     if ($loaded) {
         Write-Host "Removing loaded Az/AzureRM modules from session..."
         foreach ($m in $loaded) {
@@ -28,7 +28,7 @@ function Prepare-Az {
         Write-Host "No Az/AzureRM modules loaded in session."
     }
 
-    # Attempt to uninstall AzureRM only if the Uninstall-AzureRm helper is available
+    # Attempt to uninstall AzureRM only if Uninstall-AzureRm helper exists
     if (Get-Command -Name Uninstall-AzureRm -ErrorAction SilentlyContinue) {
         Write-Host "Uninstall-AzureRm helper found. Attempting to uninstall AzureRM (best-effort)..."
         try {
@@ -41,44 +41,26 @@ function Prepare-Az {
         Write-Host "Uninstall-AzureRm not found - skipping AzureRM uninstall."
     }
 
-    # Now ensure Az is available on the agent (we will NOT install it here)
-    $azAvailable = Get-Module -ListAvailable -Name Az* -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $azAvailable) {
-        Write-Host "##[error]Az module not found on this agent. This script expects Az to be preinstalled."
-        Write-Host "Either switch to the AzurePowerShell@* task (recommended) or install Az on the agent image."
-        throw "Az module not present"
+    # IMPORTANT: do not import Az modules here (per request).
+    # Instead, check that the required Az cmdlets are already available in the environment.
+    if (-not (Get-Command -Name Connect-AzAccount -ErrorAction SilentlyContinue)) {
+        Write-Host "##[error]Az cmdlets (e.g. Connect-AzAccount) are not available in this session."
+        Write-Host "This script intentionally does not import or install Az. Please ensure Az is preinstalled on the agent or use the AzurePowerShell@* task."
+        throw "Az cmdlets not present"
     } else {
-        Write-Host "Az module present on system: $($azAvailable.Name) $($azAvailable.Version)"
-    }
-
-    # Import the Az module (force) to ensure cmdlets like Connect-AzAccount are available
-    try {
-        Import-Module Az -Force -ErrorAction Stop
-        Write-Host "Imported Az modules into session."
-    } catch {
-        # If importing the full Az fails, try importing core accounts module as fallback
-        Write-Host "Warning: Import-Module Az failed: $_"
-        Write-Host "Attempting to import Az.Accounts specifically..."
-        try {
-            Import-Module Az.Accounts -Force -ErrorAction Stop
-            Write-Host "Imported Az.Accounts into session."
-        } catch {
-            Write-Host "##[error]Failed to import Az modules. Aborting. Error: $_"
-            throw
-        }
+        Write-Host "Az cmdlets detected in session (no import performed)."
     }
 }
 
-# Call prepare
+# Run prepare
 try {
-    Prepare-Az
+    Get-Environment
 } catch {
-    Write-Host "##[error]Could not prepare Az modules. Aborting."
-    Write-Host "Error details: $_"
+    Write-Host "##[error]Could not prepare environment: $_"
     exit 1
 }
 
-# --- Main logic (unchanged except safer debug handling in catch) ---
+# --- Main logic (unchanged) ---
 try {
     # Connect to Azure using Service Principal
     $securePassword = ConvertTo-SecureString $servicePrincipalKey -AsPlainText -Force
