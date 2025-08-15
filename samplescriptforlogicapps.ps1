@@ -28,7 +28,7 @@ if (-not $accessToken) {
 
 # ====== 2. Call Azure REST API to Get Logic App Details ======
 $apiVersion = "2019-05-01"
-$uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Logic/workflows/$logicAppName?api-version=$apiVersion"
+$uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Logic/workflows/$logicAppName?api-version=2019-05-01"
 
 $response = Invoke-RestMethod -Method Get -Uri $uri -Headers @{
     Authorization = "Bearer $accessToken"
