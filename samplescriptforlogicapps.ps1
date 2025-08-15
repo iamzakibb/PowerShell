@@ -10,8 +10,8 @@ $logicAppName      = "$(LogicAppName)"
 # ====== 1. Get Azure AD Access Token ======
 $authBody = @{
     grant_type    = "client_credentials"
-    ServicePrincipalId     = $servicePrincipalId
-    ServicePrincipalKey = $servicePrincipalKey
+    client_id     = $servicePrincipalId
+    client_secret = $servicePrincipalKey
     resource      = "https://management.azure.com/"
 }
 
