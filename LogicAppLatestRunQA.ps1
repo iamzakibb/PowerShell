@@ -1,10 +1,10 @@
 # ====== INPUTS ======
-$tenantIdQA          = "$(TenantId)"
-$servicePrincipalIdQA = "$(ServicePrincipalId)"
-$servicePrincipalKeyQA = "$(ServicePrincipalKey)"
-$subscriptionIdQA    = "$(SubscriptionId)"
-$resourceGroupNameQA = "$(ResourceGroupName)"
-$logicAppNameQA      = "$(LogicAppName)"
+$tenantIdQA          = "$(TenantIdQA)"
+$servicePrincipalIdQA = "$(ServicePrincipalIdQA)"
+$servicePrincipalKeyQA = "$(ServicePrincipalKeyQA)"
+$subscriptionIdQA    = "$(SubscriptionIdQA)"
+$resourceGroupNameQA = "$(ResourceGroupNameQA)"
+$logicAppNameQA      = "$(LogicAppNameQA)"
 
 
 # ====== 1. Get Azure AD Access Token ======
