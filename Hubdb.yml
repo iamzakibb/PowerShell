@@ -1,33 +1,44 @@
-trigger:
-    branches:
-        include:
-          - main
+trigger: none
 
 pool:
     vmImage: 'windows-latest'
 
-variables:
-  - name: HUBSPOT_PAT
-    value: '' # DO NOT set here; set secret in pipeline UI / variable group
+# variables:
+#   - name: HUBSPOT_PAT
+#     value: '' # DO NOT set here; set secret in pipeline UI / variable group
 
 steps:
   - checkout: self
-    persistCredentials: true
+    clean: true
 
   - task: PowerShell@2
     displayName: 'Export HubDB tables to CSV and commit'
     inputs:
         targetType: 'inline'
         pwsh: true
-        failOnStderr: true
+        failOnStderr: false
         script: |
+            # $token = $env:SYSTEM_ACCESSTOKEN
+            $remoteUrl = "https://anyuser:$pat@grahamsio.visualstudio.com/CN%20Website/_git/HubDB"
+
+             $pat = ${env:GIT_PAT}
+             if (-not $pat -or $pat.Trim().Length -eq 0) {
+                Write-Error "GIT_PAT not provided. Add secret pipeline variable 'GIT_PAT'."
+                exit 1
+                }
+                $pair = "anyuser:$pat"
+                $b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
+                $header = "AUTHORIZATION: Basic $b64"
+                            # $repoUrl = "https://$(Build.Repository.Uri)".Replace("https://", "https://anyuser:$pat@")
+            # git remote set-url origin $repoUrl
+
             # HubDB CSV exporter — CI/Azure DevOps friendly
               # Expects HUBSPOT_PAT set as a pipeline secret (environment variable)
 
               # ---------- CONFIG ----------
               $useHapiKey   = $false
               # $hapikey      = $env:HUBSPOT_HAPIKEY
-              $accessToken  = $env:HUBSPOT_PAT     # set in pipeline as secret variable
+              $accessToken  = ${env:HUBSPOT_PAT}     # set in pipeline as secret variable
               # Save outputs into repo workspace under 'hubdb' folder
               $repoRoot     = $env:BUILD_SOURCESDIRECTORY
               if (-not $repoRoot) { $repoRoot = (Get-Location).Path }    # local dev fallback
@@ -122,14 +133,14 @@ steps:
                   $qs = @{ limit = $limitTables; offset = $offset }
                   $url = Build-Url -base $working.url -qs $qs
                   try { $resp = Invoke-WithRetries { Invoke-RestMethod -Uri $url -Headers $headers -Method Get -ErrorAction Stop } } catch {
-                      Write-Error "Failed to list tables at offset $offset: $($_.Exception.Message)"; break
+                      Write-Error "Failed to list tables at offset {$offset}: $($_.Exception.Message)"; break
                   }
                   if ($null -ne $resp -and $null -ne $resp.results) { $page = $resp.results }
                   elseif ($null -ne $resp -and $null -ne $resp.objects) { $page = $resp.objects }
                   elseif ($resp -is [System.Array]) { $page = $resp } else { $page = @() }
                   if ($page.Count -eq 0) { Write-Host "No items returned at offset $offset — stopping pagination."; break }
                   $tables += $page
-                  Write-Host ("Fetched tables offset {0} -> {1} (total so far: {2})" -f $offset, $page.Count, $tables.Count)
+                  Write-Host ("Fetched tables offset {0} -> {1} (total so far: {2})" -f {$offset}, $page.Count, $tables.Count)
                   # Try to read total if present
                   $totalAvailable = $null
                   try {
@@ -170,7 +181,7 @@ steps:
                   $succeeded = $false
 
                   try {
-                      Write-Host "Exporting (published) table $tableId -> $csvName"
+                      Write-Host "Exporting (published) table {$tableId} -> $csvName"
                       # CSV-friendly headers (only for export calls)
                       $csvHeaders = @{}
                       if (-not $useHapiKey) { $csvHeaders["Authorization"] = "Bearer $accessToken" }
@@ -181,14 +192,14 @@ steps:
                       Invoke-WithRetries { Invoke-WebRequest -Uri $exportUrl -Headers $csvHeaders -Method Get -OutFile $csvPath -ErrorAction Stop }
                       $succeeded = $true
                   } catch {
-                      Write-Warning "Published export failed for $tableId: $($_.Exception.Message)"
+                      Write-Warning "Published export failed for {$tableId}: $($_.Exception.Message)"
                   }
 
                   if (-not $succeeded) {
                       $draftExport = "https://api.hubapi.com/cms/v3/hubdb/tables/$tableId/draft/export"
                       $draftUrl = Build-Url -base $draftExport -qs @{ format = "CSV" }
                       try {
-                          Write-Host "Trying draft export for $tableId -> $csvName"
+                          Write-Host "Trying draft export for {$tableId} -> $csvName"
                           $csvHeaders = @{}
                           if (-not $useHapiKey) { $csvHeaders["Authorization"] = "Bearer $accessToken" }
                           $csvHeaders["Accept"] = "text/csv, application/octet-stream, */*"
@@ -196,7 +207,7 @@ steps:
                           Invoke-WithRetries { Invoke-WebRequest -Uri $draftUrl -Headers $csvHeaders -Method Get -OutFile $csvPath -ErrorAction Stop }
                           $succeeded = $true
                       } catch {
-                          Write-Warning "Draft export failed for $tableId: $($_.Exception.Message)"
+                          Write-Warning "Draft export failed for {$tableId}: $($_.Exception.Message)"
                       }
                   }
 
@@ -210,7 +221,7 @@ steps:
                       Save-Manifest $manifest
                       $downloaded++
                   } else {
-                      Write-Warning "Failed to export table $tableId - no CSV saved."
+                      Write-Warning "Failed to export table {$tableId} - no CSV saved."
                   }
               }
 
@@ -218,35 +229,44 @@ steps:
               Write-Host "Downloaded: $downloaded ; Skipped: $skipped"
               Write-Host "Manifest saved to: $manifestPath"
 
-              # -------------------------
-              # Commit + push changes back to Azure Repos (only if changes)
-              # Assumes checkout: self with persistCredentials: true in pipeline
-              # -------------------------
-              try {
-                  Push-Location $repoRoot
+              
+             
+                    try {
+                    git config user.name "azure-pipelines"
+                    git config user.email "ci@azuredevops"
 
-                  # stage only hubdb folder and manifest (optional: adjust to your needs)
-                  & git add --all $outputDir $manifestPath
+                    # Stage only the outputs (safer than --all)
+                    git add --force $outputDir $manifestPath
 
-                  $porcelain = & git status --porcelain
-                  if (-not $porcelain) {
-                      Write-Host "No changes to commit."
-                  } else {
-                      # configure git author
-                      if ($env:GIT_AUTHOR_NAME) { & git config user.name $env:GIT_AUTHOR_NAME } else { & git config user.name "azure-pipelines" }
-                      if ($env:GIT_AUTHOR_EMAIL) { & git config user.email $env:GIT_AUTHOR_EMAIL } else { & git config user.email "ci@azuredevops" }
+                    $porcelain = git status --porcelain
+                    if (-not $porcelain) {
+                        Write-Host "No changes to commit."
+                    } else {
+                        git commit -m "chore: sync HubDB CSV exports - $(Get-Date -Format o)" --no-verify
 
-                      & git commit -m "chore: sync HubDB CSV exports - $(Get-Date -Format o)" --no-verify
-                      $branch = $env:BUILD_SOURCEBRANCHNAME
-                      if (-not $branch) { $branch = "main" }
-                      Write-Host "Pushing changes to origin/$branch ..."
-                      & git push origin HEAD:$branch
-                  }
-              } catch {
-                  Write-Warning "Git commit/push failed: $($_.Exception.Message)"
-              } finally {
-                  Pop-Location
-              }
+                        $branch = $env:BUILD_SOURCEBRANCHNAME
+                        if (-not $branch) { $branch = "main" }
 
+                        Write-Host "Pushing changes to origin/$branch using PAT header..."
+                        # Pass header for this single push (doesn't persist)
+                        $pushOutput = & git -c http.extraheader="$header" push origin HEAD:$branch 2>&1
+                        $pushOutput | ForEach-Object { Write-Host $_ }
+
+                        # Check exit code; if non-zero, fail explicitly
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "git push failed with exit code $LASTEXITCODE. Output:`n$pushOutput"
+                        } else {
+                            Write-Host "Push completed successfully."
+                        }
+                        Write-Host "Push completed."
+                    }
+                } catch {
+                    Write-Error "Git commit/push failed: $($_.Exception.Message)"
+                    throw
+                } finally {
+                    Pop-Location
+                }
     env:
         HUBSPOT_PAT: $(HUBSPOT_PAT)
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        GIT_PAT: $(GIT_PAT)

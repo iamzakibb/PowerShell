@@ -1,0 +1,277 @@
+trigger: none
+
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- checkout: self
+  clean: true
+
+- task: PowerShell@2
+  displayName: 'Export HubSpot Site Pages to repo and commit'
+  inputs:
+    targetType: 'inline'
+    pwsh: true
+    failOnStderr: false
+    script: |
+      # ---------- CI-friendly Site Pages exporter (Azure DevOps) ----------
+      # Expects pipeline secrets:
+      #   HUBSPOT_PAT  -> HubSpot private app token
+      #   GIT_PAT      -> Azure DevOps PAT (used only for pushing)
+      #
+      # Writes site page JSON files into repo workspace under 'sitepages' and commits/pushes.
+
+      # repo workspace root
+      $repoRoot = $env:BUILD_SOURCESDIRECTORY
+      if (-not $repoRoot) { $repoRoot = (Get-Location).Path }
+
+      # Config: read tokens from pipeline secrets
+      $accessToken = ${env:HUBSPOT_PAT}
+      $pat = ${env:GIT_PAT}
+
+      # CI-friendly output paths (repo-relative)
+      $outputDir = Join-Path $repoRoot "sitepages"
+      $manifestPath = Join-Path $outputDir "manifest.json"
+
+      # Script settings
+      $useHapiKey = $false
+      $hapikey = $null
+      $limit = 50
+      $maxProbeRetries = 2
+
+      # branch to push
+      $branch = $env:BUILD_SOURCEBRANCHNAME
+      if (-not $branch) { $branch = "main" }
+
+      # sanity checks
+      if (-not $pat -or $pat.Trim().Length -eq 0) {
+          Write-Error "GIT_PAT not provided. Add secret pipeline variable 'GIT_PAT'."
+          exit 1
+      }
+      if (-not $accessToken -or $accessToken -match "<YOUR") {
+          Write-Error "HUBSPOT_PAT not provided. Add secret pipeline variable 'HUBSPOT_PAT'."
+          exit 1
+      }
+
+      if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+
+      # Build Git auth header for single push
+      $pair = "anyuser:$pat"
+      $b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
+      $header = "AUTHORIZATION: Basic $b64"
+
+      # ---------------- HubSpot Site Pages script (adapted) ----------------
+      # headers
+      $headers = @{}
+      if (-not $useHapiKey) {
+          $headers = @{ "Authorization" = "Bearer $accessToken"; "Accept" = "application/json" }
+      } else {
+          $headers = @{ "Accept" = "application/json" }
+      }
+
+      # load manifest
+      $manifest = @{}
+      if (Test-Path $manifestPath) {
+          try { $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop } catch { $manifest = @{} }
+      }
+      if (-not $manifest) { $manifest = @{} }
+      function Save-Manifest($m) { $m | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding UTF8 }
+
+      function Build-Url($base, $qs) {
+          $query = ""
+          if ($qs -and $qs.Count -gt 0) {
+              $pairs = @()
+              foreach ($k in $qs.Keys) { $pairs += "$k=$([uri]::EscapeDataString($qs[$k]))" }
+              $query = $pairs -join "&"
+          }
+          if ($useHapiKey) {
+              if ($query) { return "$base`?$query&hapikey=$hapikey" } else { return "$base?hapikey=$hapikey" }
+          } else {
+              if ($query) { return "$base`?$query" } else { return $base }
+          }
+      }
+
+      function SanitizeName([string]$n) {
+          if (-not $n) { return [guid]::NewGuid().ToString() }
+          $invalid = [System.IO.Path]::GetInvalidFileNameChars()
+          foreach ($c in $invalid) { $n = $n.Replace($c, "_") }
+          $n = $n.Trim()
+          if ($n.Length -eq 0) { $n = [guid]::NewGuid().ToString() }
+          return $n
+      }
+
+      # probe endpoints
+      $probes = @(
+          @{ name = "GET cms v3 site-pages"; method = "GET";  url = "https://api.hubapi.com/cms/v3/pages/site-pages"; qs = @{ limit = $limit; offset = 0 } },
+          @{ name = "GET cms v3 landing-pages"; method = "GET";  url = "https://api.hubapi.com/cms/v3/pages/landing-pages"; qs = @{ limit = $limit; offset = 0 } },
+          @{ name = "GET legacy v2 pages list"; method = "GET"; url = "https://api.hubapi.com/content/api/v2/pages"; qs = @{ limit = $limit; offset = 0 } }
+      )
+
+      Write-Host "Probing page-list endpoints..."
+      $workingProbe = $null
+      foreach ($p in $probes) {
+          $url = Build-Url -base $p.url -qs $p.qs
+          Write-Host "  Trying [$($p.name)] $url"
+          $ok = $false
+          for ($i=1; $i -le $maxProbeRetries; $i++) {
+              try {
+                  $resp = Invoke-RestMethod -Uri $url -Method $p.method -Headers $headers -ErrorAction Stop
+                  $ok = $true; break
+              } catch {
+                  Start-Sleep -Seconds (2 * $i)
+              }
+          }
+          if ($ok) {
+              Write-Host "    Probe succeeded: $($p.name)" -ForegroundColor Green
+              $workingProbe = $p; break
+          } else {
+              Write-Warning "    Probe failed: $($p.name)"
+          }
+      }
+      if (-not $workingProbe) { Write-Error "No listing endpoint worked for your account/token. Check token scopes (CMS Pages)."; exit 1 }
+
+      function Get-AllPages($baseUrl) {
+          $all = @()
+          $offset = 0
+          while ($true) {
+              $qs = @{ limit = $limit; offset = $offset }
+              $url = Build-Url -base $baseUrl -qs $qs
+              try {
+                  $resp = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop
+              } catch {
+                  Write-Error "Failed to list pages at offset $offset : $($_.Exception.Message)"
+                  break
+              }
+              if ($resp -and $resp.results) { $items = $resp.results }
+              elseif ($resp -and $resp.objects) { $items = $resp.objects }
+              elseif ($resp -is [System.Array]) { $items = $resp } else { $items = @() }
+
+              if ($items.Count -eq 0) { break }
+              $all += $items
+              Write-Host "  Fetched page offset $offset -> items: $($items.Count) total so far: $($all.Count)"
+              $offset += $limit
+          }
+          return $all
+      }
+
+      $listingBase = $workingProbe.url
+      Write-Host "Listing pages from chosen endpoint: $($workingProbe.name)"
+      $pages = Get-AllPages -baseUrl $listingBase
+      if (-not $pages -or $pages.Count -eq 0) { Write-Warning "No pages found. Exiting."; exit 0 }
+      Write-Host "Total pages discovered: $($pages.Count)" -ForegroundColor Green
+
+      function Get-PageDetails($pageId) {
+          # attempt site-pages v3 details, fallback to legacy path if necessary
+          $urlsToTry = @(
+              "https://api.hubapi.com/cms/v3/pages/site-pages/$pageId",
+              "https://api.hubapi.com/content/api/v2/pages/$pageId"
+          )
+          foreach ($u in $urlsToTry) {
+              try {
+                  $r = Invoke-RestMethod -Uri $u -Method Get -Headers $headers -ErrorAction Stop
+                  if ($r) { return $r }
+              } catch { }
+          }
+          return $null
+      }
+
+      # download loop
+      $downloaded = 0; $skipped = 0
+      foreach ($p in $pages) {
+          $pageId = $null
+          if ($p.id) { $pageId = $p.id } elseif ($p.objectId) { $pageId = $p.objectId } elseif ($p.pageId) { $pageId = $p.pageId }
+          if (-not $pageId) { Write-Warning "Skipping page without id"; continue }
+
+          $name = $null
+          if ($p.slug) { $name = $p.slug } elseif ($p.name) { $name = $p.name } elseif ($p.htmlTitle) { $name = $p.htmlTitle } else { $name = $pageId }
+          $name = SanitizeName $name
+          $outName = "{0}_{1}.json" -f $name, $pageId
+          $outPath = Join-Path $outputDir $outName
+
+          $remoteVersion = $null
+          if ($p.updatedAt) { $remoteVersion = $p.updatedAt }
+          elseif ($p.updated) { $remoteVersion = $p.updated }
+          elseif ($p.createdAt) { $remoteVersion = $p.createdAt }
+          elseif ($p.publishDate) { $remoteVersion = $p.publishDate }
+
+          $existing = $null
+          try { $existing = $manifest.$pageId } catch { $existing = $null }
+
+          $needDownload = $true
+          if ($existing) {
+              if ($remoteVersion -and $existing.remoteVersion -and ($existing.remoteVersion -eq $remoteVersion) -and (Test-Path (Join-Path $outputDir $existing.fileName))) {
+                  $needDownload = $false
+              }
+          }
+
+          if (-not $needDownload) { $skipped++; Write-Host "Skipped (up-to-date): $outName" -ForegroundColor DarkGray; continue }
+
+          $full = Get-PageDetails -pageId $pageId
+          if (-not $full) { Write-Warning "Failed to fetch details for page $pageId - skipping"; continue }
+
+          try {
+              $full | ConvertTo-Json -Depth 12 | Set-Content -Path $outPath -Encoding UTF8
+              Write-Host "Saved page: $outName" -ForegroundColor Green
+              $downloaded++
+              $manifest.$pageId = [ordered]@{
+                  fileName = $outName
+                  remoteVersion = ($remoteVersion -as [string])
+                  lastDownloaded = (Get-Date).ToString("o")
+              }
+              Save-Manifest -m $manifest
+          } catch {
+              Write-Warning "Failed to save page $pageId : $($_.Exception.Message)"
+          }
+      }
+
+      Write-Host "`nDone. Downloaded: $downloaded ; Skipped: $skipped"
+      Write-Host "Manifest saved to: $manifestPath"
+
+      # ---------------- Git commit & push (repo workspace) ----------------
+      if ($downloaded -eq 0) {
+          Write-Host "No new or updated pages — skipping commit/push." -ForegroundColor Yellow
+          exit 0
+      }
+
+      Push-Location $repoRoot
+      try {
+          git config user.name "azure-pipelines"
+          git config user.email "ci@azuredevops"
+
+          git config core.autocrlf false
+          git config core.safecrlf false
+
+          # repo-relative names (do NOT pass absolute Windows paths to git)
+          $relOutput = Split-Path -Leaf $outputDir           # "sitepages"
+          $manifestName = Split-Path -Leaf $manifestPath
+          $manifestRel = "$relOutput/$manifestName"
+
+          & git add --force -- $relOutput
+          & git add --force -- $manifestRel 2>$null
+
+          $porcelain = (& git status --porcelain)
+          if (-not $porcelain) {
+              Write-Host "No changes to commit."
+          } else {
+              & git commit -m "chore: sync HubSpot site pages - $(Get-Date -Format o)" --no-verify
+
+              Write-Host "Pushing changes to origin/$branch using PAT header..."
+              $pushOutput = & git -c http.extraheader="$header" push origin HEAD:$branch 2>&1
+              $pushOutput | ForEach-Object { Write-Host $_ }
+
+              if ($LASTEXITCODE -ne 0) {
+                  throw "git push failed with exit code $LASTEXITCODE. Output:`n$pushOutput"
+              } else {
+                  Write-Host "Push completed successfully."
+              }
+          }
+      } catch {
+          Write-Error "Git commit/push failed: $($_.Exception.Message)"
+          throw
+      } finally {
+          Pop-Location
+      }
+
+  env:
+    HUBSPOT_PAT: $(HUBSPOT_PAT)
+    GIT_PAT: $(GIT_PAT)
