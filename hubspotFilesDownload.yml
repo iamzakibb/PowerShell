@@ -1,273 +1,321 @@
 trigger: none
 
 pool:
-  vmImage: 'windows-latest'
+    vmImage: 'windows-latest'
 
 steps:
-- checkout: self
-  clean: true
+  - checkout: self
+    clean: true
 
-- task: PowerShell@2
-  displayName: 'Download HubSpot files and push new ones to Azure Repos'
-  inputs:
-    targetType: 'inline'
-    pwsh: true
-    failOnStderr: false
-    script: |
-      # ---------- CONFIG ----------
-
-      # $useHapiKey  = $false
-      $hapikey     = ${env:HUBSPOT_HAPIKEY}   # optional if you use HAPI key mode
-      $accessToken = ${env:HUBSPOT_PAT}       # set in pipeline as secret
-      $repoRoot    = $env:BUILD_SOURCESDIRECTORY
-      if (-not $repoRoot) { $repoRoot = (Get-Location).Path }
-      $outputDir   = Join-Path $repoRoot "hubspot_files"
-      $manifestPath = Join-Path $outputDir "manifest.json"
-      $limit = 100
-      $branch = $env:BUILD_SOURCEBRANCHNAME
+  - task: PowerShell@2
+    displayName: 'Download HubSpot files and push new ones to Azure Repos (with push test)'
+    inputs:
+        targetType: 'inline'
+        pwsh: true
+        failOnStderr: false
+        script: |
+            # ---------------- CONFIG ----------------
+            $useHapiKey  = $false
+            $accessToken = ${env:HUBSPOT_PAT}       # HubSpot token (set as pipeline secret)
+            $repoRoot    = $env:BUILD_SOURCESDIRECTORY
+            if (-not $repoRoot) { $repoRoot = (Get-Location).Path }
+            $outputDir   = Join-Path $repoRoot "hubspot_files"
+            $manifestPath = Join-Path $outputDir "manifest.json"
+            $limit = 100
+            $branch = $env:BUILD_SOURCEBRANCHNAME
             if (-not $branch) { $branch = "main" }
-            # -----------------------------
-            $remoteUrl = "https://anyuser:$pat@grahamsio.visualstudio.com/CN%20Website/_git/HubSpotFiles"
 
-        $pat = ${env:GIT_PAT}
-        if (-not $pat -or $pat.Trim().Length -eq 0) {
-            Write-Error "GIT_PAT not provided. Add secret pipeline variable 'GIT_PAT'."
-            exit 1
+            # HubSpot endpoint variables (change these if you want to target different endpoints)
+            $hubspotApiBase        = "https://api.hubapi.com"
+            $filesSearchEndpoint   = "$hubspotApiBase/files/v3/files/search"
+            $signedUrlTemplate     = "$hubspotApiBase/files/v3/files/{0}/signed-url"
+            # ----------------------------------------
+
+            # Git PAT (for push) provided as pipeline secret GIT_PAT
+            $pat = ${env:GIT_PAT}
+            if (-not $pat -or $pat.Trim().Length -eq 0) {
+                Write-Error "GIT_PAT not set. Create pipeline secret variable GIT_PAT."
+                exit 1
             }
             $pair = "anyuser:$pat"
             $b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
             $header = "AUTHORIZATION: Basic $b64"
-                      
-        # Ensure secrets present
-        if (-not $accessToken -or $accessToken -match "<YOUR") {
-            Write-Error "HUBSPOT_PAT not set. Create pipeline secret variable HUBSPOT_PAT."
-            exit 1
-        }
 
-        # Create output dir inside repo workspace
-        if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+            # Ensure HUBSPOT token present
+            if (-not $accessToken -or $accessToken -match "<YOUR") {
+                Write-Error "HUBSPOT_PAT not set. Create pipeline secret variable HUBSPOT_PAT."
+                exit 1
+            }
 
-        # Build Git auth header using PAT provided in pipeline (GIT_PAT)
-        $pat = ${env:GIT_PAT}
-        if (-not $pat -or $pat.Trim().Length -eq 0) {
-            Write-Error "GIT_PAT not set. Create pipeline secret variable GIT_PAT."
-            exit 1
+            # Create workspace output dir
+            if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+
+            # --------- quick push test: create a test file, commit to test-branch, push, then delete remote branch ----------
+            Write-Host "Running quick push test to verify GIT_PAT and push permissions..."
+            $testBranch = "ci/hubspot-push-test-" + ([guid]::NewGuid().ToString().Substring(0,8))
+            $testFile = Join-Path $repoRoot "hubspot_push_test.txt"
+            try {
+                Push-Location $repoRoot
+
+                # create test file
+                "hello world from pipeline test" | Out-File -FilePath $testFile -Encoding utf8 -Force
+
+                # configure git identity for CI workspace
+                & git config user.name "azure-pipelines"
+                & git config user.email "ci@azuredevops"
+
+                # create local test branch from current HEAD (do not change main)
+                & git checkout -b $testBranch
+
+                # stage and commit test file
+                & git add --force $testFile
+                $commitOut = & git commit -m "test: pipeline push verification - $testBranch" --no-verify 2>&1
+                if ($LASTEXITCODE -ne 0 -and $commitOut -match "nothing to commit") {
+                    Write-Host "No changes to commit for test file (it may already exist)."
+                } else {
+                    Write-Host $commitOut
+                }
+
+                # push test branch using http.extraheader (capture output)
+                $pushOutput = & git -c http.extraheader="$header" push origin $testBranch 2>&1
+                $pushOutput | ForEach-Object { Write-Host $_ }
+
+                if ($LASTEXITCODE -ne 0) { throw "Test push failed (exit code $LASTEXITCODE). See output above." }
+
+                Write-Host "Test push succeeded. Cleaning up remote test branch..."
+                # delete remote test branch (best-effort)
+                $delOut = & git -c http.extraheader="$header" push origin --delete $testBranch 2>&1
+                $delOut | ForEach-Object { Write-Host $_ }
+                if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to delete remote test branch (non-fatal). Output: $delOut" }
+
+                # switch back to original branch (BUILD_SOURCEBRANCHNAME)
+                & git checkout $branch 2>$null | Out-Null
+            } catch {
+                Write-Warning "Push test failed: $($_.Exception.Message)"
+                # continue — we will still attempt main logic, but you can choose to exit here
+                # exit 1
+            } finally {
+                # cleanup local test file & local branch if present
+                if (Test-Path $testFile) { Remove-Item $testFile -Force -ErrorAction SilentlyContinue }
+                try { & git branch -D $testBranch 2>$null | Out-Null } catch {}
+                Pop-Location
+            }
+            Write-Host "Push test complete."
+
+            # ---------------- HubSpot downloader - using endpoint variables ----------------
+            $headers = @{}
+            if (-not $useHapiKey) {
+                $headers = @{ "Authorization" = "Bearer $accessToken"; "Accept" = "application/json" }
+            } else {
+                $headers = @{ "Accept" = "application/json" }
+            }
+
+            function Save-Manifest { param($m) $m | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding UTF8 }
+
+            function Build-Url($base, $qs) {
+                $query = ""
+                if ($qs -and $qs.Count -gt 0) {
+                    $parts = @()
+                    foreach ($k in $qs.Keys) { $parts += "$k=$([uri]::EscapeDataString($qs[$k]))" }
+                    $query = $parts -join "&"
+                }
+                if ($useHapiKey) {
+                    if ($query) { return "$base`?$query&hapikey=$hapikey" } else { return "$base?hapikey=$hapikey" }
+                } else {
+                    if ($query) { return "$base`?$query" } else { return $base }
+                }
+            }
+
+            function SanitizeFileName([string]$n) {
+                if (-not $n) { return [guid]::NewGuid().ToString() }
+                $invalid = [System.IO.Path]::GetInvalidFileNameChars()
+                foreach ($c in $invalid) { $n = $n.Replace($c, "_") }
+                $n = $n.Trim()
+                if ($n.Length -eq 0) { $n = [guid]::NewGuid().ToString() }
+                return $n
+            }
+
+            function Get-AllFiles {
+                $all = @()
+                $after = $null
+                do {
+                    $qs = @{ limit = $limit }
+                    if ($after) { $qs.after = $after }
+                    $url = Build-Url -base $filesSearchEndpoint -qs $qs
+                    try {
+                        $resp = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop
+                    } catch {
+                        Write-Error "Failed to list files: $($_.Exception.Message)"
+                        return $all
+                    }
+                    if ($null -ne $resp.results) { $items = $resp.results }
+                    elseif ($null -ne $resp.files) { $items = $resp.files }
+                    elseif ($null -ne $resp.objects) { $items = $resp.objects }
+                    else { $items = @() }
+                    $all += $items
+                    if ($resp.paging -and $resp.paging.next -and $resp.paging.next.after) { $after = $resp.paging.next.after } else { $after = $null }
+                    Write-Host "Fetched page; items this page: $($items.Count) total so far: $($all.Count)"
+                } while ($after)
+                return $all
+            }
+
+            function Get-SignedUrl($fileId) {
+                $url = [string]::Format($signedUrlTemplate, $fileId)
+                try { $r = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop } catch { return $null }
+                if ($r.url) { return $r.url }
+                if ($r.signedUrl) { return $r.signedUrl }
+                if ($r.signed_url) { return $r.signed_url }
+                return $null
+            }
+
+            function Get-RemoteFingerprint($downloadUrl) {
+                try {
+                    $head = Invoke-WebRequest -Uri $downloadUrl -Method Head -UseBasicParsing -ErrorAction Stop
+                    $len = $null; $lm = $null
+                    if ($head.Headers.'Content-Length') { $len = $head.Headers.'Content-Length' }
+                    if ($head.Headers.'Last-Modified') { $lm = $head.Headers.'Last-Modified' }
+                    if ($len -or $lm) { return ("{0}|{1}" -f ($len -as [string]), ($lm -as [string])) }
+                } catch { return $null }
+                return $null
+            }
+
+            # Main download loop (same logic you had)
+            Write-Host "Listing files from HubSpot..."
+            $files = Get-AllFiles
+            if (-not $files -or $files.Count -eq 0) { Write-Warning "No files found or listing failed. Exiting."; exit 0 }
+            Write-Host "Total files discovered: $($files.Count)" -ForegroundColor Green
+
+            $downloaded = 0; $skipped = 0
+            $newDownloads = @()
+
+            foreach ($f in $files) {
+                $fileId = $null
+                if ($f.id) { $fileId = $f.id } elseif ($f.objectId) { $fileId = $f.objectId } elseif ($f.fileId) { $fileId = $f.fileId } elseif ($f.uuid) { $fileId = $f.uuid }
+                if (-not $fileId) { Write-Warning "Skipping item with no id"; continue }
+
+                $name = $f.name
+                if (-not $name -and $f.url) {
+                    try { $name = [System.IO.Path]::GetFileName([uri]$f.url).Split('?')[0] } catch { $name = $fileId }
+                }
+                $name = SanitizeFileName $name
+
+                $remoteVersion = $null
+                if ($f.updated) { $remoteVersion = $f.updated }
+                elseif ($f.updatedAt) { $remoteVersion = $f.updatedAt }
+                elseif ($f.created) { $remoteVersion = $f.created }
+                elseif ($f.createdAt) { $remoteVersion = $f.createdAt }
+                elseif ($f.timestamp) { $remoteVersion = $f.timestamp }
+
+                $downloadUrl = $null
+                if ($fileId) { $downloadUrl = Get-SignedUrl -fileId $fileId }
+                if (-not $downloadUrl -and $f.url) { $downloadUrl = $f.url }
+                if (-not $downloadUrl) { Write-Warning "No downloadable URL for $fileId - skipping."; continue }
+
+                $remoteFinger = $null
+                if (-not $remoteVersion) { $remoteFinger = Get-RemoteFingerprint -downloadUrl $downloadUrl }
+
+                $existing = $null
+                try { $existing = $manifest.$fileId } catch { $existing = $null }
+
+                $needDownload = $true
+                if ($existing) {
+                    if ($remoteVersion) {
+                        if ($existing.remoteVersion -and ($existing.remoteVersion -eq $remoteVersion)) { $needDownload = $false }
+                    } elseif ($remoteFinger) {
+                        if ($existing.remoteFinger -and ($existing.remoteFinger -eq $remoteFinger) -and (Test-Path (Join-Path $outputDir $existing.fileName))) {
+                            $needDownload = $false
+                        }
+                    } else {
+                        $localPath = Join-Path $outputDir $existing.fileName
+                        if (Test-Path $localPath) { $needDownload = $false }
+                    }
+                }
+
+                if (-not $needDownload) { $skipped++; Write-Host "Skipped (up-to-date): $name" -ForegroundColor DarkGray; continue }
+
+                $destName = $name
+                $destPath = Join-Path $outputDir $destName
+                if (Test-Path $destPath) {
+                    if (-not $existing -or $existing.fileName -ne $destName) {
+                        $ext = [System.IO.Path]::GetExtension($destName)
+                        $base = [System.IO.Path]::GetFileNameWithoutExtension($destName)
+                        $destName = "{0}_{1}{2}" -f $base, $fileId, $ext
+                        $destPath = Join-Path $outputDir $destName
+                    }
+                }
+
+                try {
+                    Invoke-WebRequest -Uri $downloadUrl -OutFile $destPath -UseBasicParsing -ErrorAction Stop
+                    Write-Host "Downloaded: $destName" -ForegroundColor Green
+                    $downloaded++
+                    $newDownloads += $destPath
+                    $manifest.$fileId = [ordered]@{
+                        fileName = $destName
+                        remoteVersion = ($remoteVersion -as [string])
+                        remoteFinger = ($remoteFinger -as [string])
+                        lastDownloaded = (Get-Date).ToString("o")
+                    }
+                    Save-Manifest $manifest
+                } catch {
+                    Write-Warning "Failed to download $destName : $($_.Exception.Message)"
+                    continue
+                }
+            }
+
+            Write-Host "`nDone. Downloaded: $downloaded ; Skipped: $skipped"
+            Write-Host "Manifest saved to: $manifestPath"
+
+            # ---------------- Git commit & push (repo workspace) ----------------
+            if ($newDownloads.Count -eq 0) {
+                Write-Host "No new files downloaded this run — skipping commit/push." -ForegroundColor Yellow
+                exit 0
+            }
+
+                          Push-Location $repoRoot
+                      try {
+                          git config user.name "azure-pipelines"
+                          git config user.email "ci@azuredevops"
+
+                          # Avoid LF->CRLF warnings in CI workspace
+                          git config core.autocrlf false
+                          git config core.safecrlf false
+
+                          # Use repo-relative paths (don't pass absolute Windows paths to git)
+                          $relOutput = Split-Path -Leaf $outputDir            # e.g. "hubspot_files"
+                          $manifestName = Split-Path -Leaf $manifestPath      # e.g. "manifest.json"
+                          $manifestRel = "$relOutput/$manifestName"           # e.g. "hubspot_files/manifest.json"
+
+                          # Stage the output directory (force to override .gitignore if necessary)
+                          & git add --force -- $relOutput
+
+                          # Stage manifest explicitly (in case it wasn't included above)
+                          & git add --force -- $manifestRel 2>$null
+
+                          # You can uncomment the following if you want to stage deletions too:
+                          # & git add -A -- $relOutput
+
+                          $porcelain = (& git status --porcelain)
+                          if (-not $porcelain) {
+                              Write-Host "No changes to commit."
+                          } else {
+                              & git commit -m "chore: sync HubSpot files - $(Get-Date -Format o)" --no-verify
+                              Write-Host "Pushing changes to origin/$branch using PAT header (capturing output)..."
+                              $pushOutput = & git -c http.extraheader="$header" push origin HEAD:$branch 2>&1
+                              $pushOutput | ForEach-Object { Write-Host $_ }
+
+                              if ($LASTEXITCODE -ne 0) {
+                                  throw "git push failed with exit code $LASTEXITCODE. Output:`n$pushOutput"
+                              } else {
+                                  Write-Host "Push completed successfully."
+                              }
                           }
-              $pair = "anyuser:$pat"
-              $b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
-              $header = "AUTHORIZATION: Basic $b64"
+                      } catch {
+                          Write-Error "Git commit/push failed: $($_.Exception.Message)"
+                          throw
+                      } finally {
+                          Pop-Location
+                      }
 
-              # ---------------- HubSpot downloader  ----------------
-        $useHapiKey = [bool]$useHapiKey
-        $headers = @{}
-        if (-not $useHapiKey) {
-            $headers = @{ "Authorization" = "Bearer $accessToken"; "Accept" = "application/json" }
-        } else {
-            $headers = @{ "Accept" = "application/json" }
-        }
-
-      # load manifest
-      $manifest = @{}
-      if (Test-Path $manifestPath) {
-          try { $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop } catch { $manifest = @{} }
-      }
-      if (-not $manifest) { $manifest = @{} }
-
-      function Save-Manifest { param($m) $m | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding UTF8 }
-
-      function Build-Url($base, $qs) {
-          $query = ""
-          if ($qs -and $qs.Count -gt 0) {
-              $pairs = @()
-              foreach ($k in $qs.Keys) { $pairs += "$k=$([uri]::EscapeDataString($qs[$k]))" }
-              $query = $pairs -join "&"
-          }
-          if ($useHapiKey) {
-              if ($query) { return "$base`?$query&hapikey=$hapikey" } else { return "$base?hapikey=$hapikey" }
-          } else {
-              if ($query) { return "$base`?$query" } else { return $base }
-          }
-      }
-
-      function SanitizeFileName([string]$n) {
-          if (-not $n) { return [guid]::NewGuid().ToString() }
-          $invalid = [System.IO.Path]::GetInvalidFileNameChars()
-          foreach ($c in $invalid) { $n = $n.Replace($c, "_") }
-          $n = $n.Trim()
-          if ($n.Length -eq 0) { $n = [guid]::NewGuid().ToString() }
-          return $n
-      }
-
-      function Get-AllFiles {
-          $all = @()
-          $after = $null
-          do {
-              $qs = @{ limit = $limit }
-              if ($after) { $qs.after = $after }
-              $url = Build-Url -base "https://api.hubapi.com/files/v3/files/search" -qs $qs
-              try {
-                  $resp = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop
-              } catch {
-                  Write-Error "Failed to list files: $($_.Exception.Message)"
-                  return $all
-              }
-              if ($null -ne $resp.results) { $items = $resp.results }
-              elseif ($null -ne $resp.files) { $items = $resp.files }
-              elseif ($null -ne $resp.objects) { $items = $resp.objects }
-              else { $items = @() }
-              $all += $items
-              if ($resp.paging -and $resp.paging.next -and $resp.paging.next.after) { $after = $resp.paging.next.after } else { $after = $null }
-              Write-Host "Fetched page; items this page: $($items.Count) total so far: $($all.Count)"
-          } while ($after)
-          return $all
-      }
-
-      function Get-SignedUrl($fileId) {
-          $url = Build-Url -base ("https://api.hubapi.com/files/v3/files/$fileId/signed-url") -qs @{ }
-          try { $r = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop } catch { return $null }
-          if ($r.url) { return $r.url }
-          if ($r.signedUrl) { return $r.signedUrl }
-          if ($r.signed_url) { return $r.signed_url }
-          return $null
-      }
-
-      function Get-RemoteFingerprint($downloadUrl) {
-          try {
-              $head = Invoke-WebRequest -Uri $downloadUrl -Method Head -UseBasicParsing -ErrorAction Stop
-              $len = $null; $lm = $null
-              if ($head.Headers.'Content-Length') { $len = $head.Headers.'Content-Length' }
-              if ($head.Headers.'Last-Modified') { $lm = $head.Headers.'Last-Modified' }
-              if ($len -or $lm) { return ("{0}|{1}" -f ($len -as [string]), ($lm -as [string])) }
-          } catch { return $null }
-          return $null
-      }
-
-      # main download
-      Write-Host "Listing files from HubSpot..."
-      $files = Get-AllFiles
-      if (-not $files -or $files.Count -eq 0) { Write-Warning "No files found or listing failed. Exiting."; exit 0 }
-      Write-Host "Total files discovered: $($files.Count)" -ForegroundColor Green
-
-      $downloaded = 0; $skipped = 0
-      $newDownloads = @()
-
-      foreach ($f in $files) {
-          $fileId = $null
-          if ($f.id) { $fileId = $f.id } elseif ($f.objectId) { $fileId = $f.objectId } elseif ($f.fileId) { $fileId = $f.fileId } elseif ($f.uuid) { $fileId = $f.uuid }
-          if (-not $fileId) { Write-Warning "Skipping item with no id"; continue }
-
-          $name = $f.name
-          if (-not $name -and $f.url) {
-              try { $name = [System.IO.Path]::GetFileName([uri]$f.url).Split('?')[0] } catch { $name = $fileId }
-          }
-          $name = SanitizeFileName $name
-
-          $remoteVersion = $null
-          if ($f.updated) { $remoteVersion = $f.updated }
-          elseif ($f.updatedAt) { $remoteVersion = $f.updatedAt }
-          elseif ($f.created) { $remoteVersion = $f.created }
-          elseif ($f.createdAt) { $remoteVersion = $f.createdAt }
-          elseif ($f.timestamp) { $remoteVersion = $f.timestamp }
-
-          $downloadUrl = $null
-          if ($fileId) { $downloadUrl = Get-SignedUrl -fileId $fileId }
-          if (-not $downloadUrl -and $f.url) { $downloadUrl = $f.url }
-          if (-not $downloadUrl) { Write-Warning "No downloadable URL for $fileId - skipping."; continue }
-
-          $remoteFinger = $null
-          if (-not $remoteVersion) { $remoteFinger = Get-RemoteFingerprint -downloadUrl $downloadUrl }
-
-          $existing = $null
-          try { $existing = $manifest.$fileId } catch { $existing = $null }
-
-          $needDownload = $true
-          if ($existing) {
-              if ($remoteVersion) {
-                  if ($existing.remoteVersion -and ($existing.remoteVersion -eq $remoteVersion)) { $needDownload = $false }
-              } elseif ($remoteFinger) {
-                  if ($existing.remoteFinger -and ($existing.remoteFinger -eq $remoteFinger) -and (Test-Path (Join-Path $outputDir $existing.fileName))) {
-                      $needDownload = $false
-                  }
-              } else {
-                  $localPath = Join-Path $outputDir $existing.fileName
-                  if (Test-Path $localPath) { $needDownload = $false }
-              }
-          }
-
-          if (-not $needDownload) { $skipped++; Write-Host "Skipped (up-to-date): $name" -ForegroundColor DarkGray; continue }
-
-          $destName = $name
-          $destPath = Join-Path $outputDir $destName
-          if (Test-Path $destPath) {
-              if (-not $existing -or $existing.fileName -ne $destName) {
-                  $ext = [System.IO.Path]::GetExtension($destName)
-                  $base = [System.IO.Path]::GetFileNameWithoutExtension($destName)
-                  $destName = "{0}_{1}{2}" -f $base, $fileId, $ext
-                  $destPath = Join-Path $outputDir $destName
-              }
-          }
-
-          try {
-              Invoke-WebRequest -Uri $downloadUrl -OutFile $destPath -UseBasicParsing -ErrorAction Stop
-              Write-Host "Downloaded: $destName" -ForegroundColor Green
-              $downloaded++
-              $newDownloads += $destPath
-              $manifest.$fileId = [ordered]@{
-                  fileName = $destName
-                  remoteVersion = ($remoteVersion -as [string])
-                  remoteFinger = ($remoteFinger -as [string])
-                  lastDownloaded = (Get-Date).ToString("o")
-              }
-              Save-Manifest $manifest
-          } catch {
-              Write-Warning "Failed to download $destName : $($_.Exception.Message)"
-              continue
-          }
-      }
-
-      Write-Host "`nDone. Downloaded: $downloaded ; Skipped: $skipped"
-      Write-Host "Manifest saved to: $manifestPath"
-
-      # ---------------- Git commit & push (repo workspace) ----------------
-      if ($newDownloads.Count -eq 0) {
-          Write-Host "No new files downloaded this run — skipping commit/push." -ForegroundColor Yellow
-          exit 0
-      }
-
-      Push-Location $remoteUrl
-      try {
-          git config user.name "azure-pipelines"
-          git config user.email "ci@azuredevops"
-
-          # Avoid LF->CRLF warnings in CI workspace
-          git config core.autocrlf false
-          git config core.safecrlf false
-
-          # Stage the new/changed files (and the manifest)
-          git add --force (Join-Path $outputDir "*") $manifestPath
-
-          $porcelain = git status --porcelain
-          if (-not $porcelain) {
-              Write-Host "No changes to commit."
-          } else {
-              git commit -m "chore: sync HubSpot files - $(Get-Date -Format o)" --no-verify
-
-              Write-Host "Pushing changes to origin/$branch using PAT header (capturing output)..."
-              $pushOutput = & git -c http.extraheader="$header" push origin HEAD:$branch 2>&1
-              $pushOutput | ForEach-Object { Write-Host $_ }
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "git push failed with exit code $LASTEXITCODE. Output:`n$pushOutput"
-              } else {
-                  Write-Host "Push completed successfully."
-              }
-          }
-      } catch {
-          Write-Error "Git commit/push failed: $($_.Exception.Message)"
-          throw
-      } finally {
-          Pop-Location
-      }
-  env:
-    HUBSPOT_PAT: $(HUBSPOT_PAT)
-    GIT_PAT: $(GIT_PAT)
+    env:
+        HUBSPOT_PAT: $(HUBSPOT_PAT)
+        GIT_PAT: $(GIT_PAT)

@@ -56,9 +56,60 @@ steps:
       if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
 
       # Build Git auth header for single push
-      $pair = "anyuser:$pat"
-      $b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
-      $header = "AUTHORIZATION: Basic $b64"
+                $pair = "anyuser:$pat"
+                $b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
+                $header = "AUTHORIZATION: Basic $b64"
+                # --------- quick push test: create a test file, commit to test-branch, push, then delete remote branch ----------
+                          Write-Host "Running quick push test to verify GIT_PAT and push permissions..."
+                          $testBranch = "ci/hubspot-push-test-" + ([guid]::NewGuid().ToString().Substring(0,8))
+                    $testFile = Join-Path $repoRoot "hubspot_push_test.txt"
+                    try {
+                        Push-Location $repoRoot
+
+                    # create test file
+                    "hello world from pipeline test" | Out-File -FilePath $testFile -Encoding utf8 -Force
+
+                    # configure git identity for CI workspace
+                    & git config user.name "azure-pipelines"
+                    & git config user.email "ci@azuredevops"
+
+                    # create local test branch from current HEAD (do not change main)
+                    & git checkout -b $testBranch
+
+                    # stage and commit test file
+                    & git add --force $testFile
+                    $commitOut = & git commit -m "test: pipeline push verification - $testBranch" --no-verify 2>&1
+                    if ($LASTEXITCODE -ne 0 -and $commitOut -match "nothing to commit") {
+                        Write-Host "No changes to commit for test file (it may already exist)."
+                    } else {
+                        Write-Host $commitOut
+                    }
+
+                    # push test branch using http.extraheader (capture output)
+                    $pushOutput = & git -c http.extraheader="$header" push origin $testBranch 2>&1
+                    $pushOutput | ForEach-Object { Write-Host $_ }
+
+                    if ($LASTEXITCODE -ne 0) { throw "Test push failed (exit code $LASTEXITCODE). See output above." }
+
+                    Write-Host "Test push succeeded. Cleaning up remote test branch..."
+                    # delete remote test branch (best-effort)
+                    $delOut = & git -c http.extraheader="$header" push origin --delete $testBranch 2>&1
+                    $delOut | ForEach-Object { Write-Host $_ }
+                    if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to delete remote test branch (non-fatal). Output: $delOut" }
+
+                        # switch back to original branch (BUILD_SOURCEBRANCHNAME)
+                        & git checkout $branch 2>$null | Out-Null
+                    } catch {
+                        Write-Warning "Push test failed: $($_.Exception.Message)"
+                        # continue — we will still attempt main logic, but you can choose to exit here
+                        # exit 1
+                    } finally {
+                        # cleanup local test file & local branch if present
+                        if (Test-Path $testFile) { Remove-Item $testFile -Force -ErrorAction SilentlyContinue }
+                        try { & git branch -D $testBranch 2>$null | Out-Null } catch {}
+                        Pop-Location
+                    }
+                    Write-Host "Push test complete."
 
       # ---------------- HubSpot Site Pages script (adapted) ----------------
       # headers
@@ -139,7 +190,7 @@ steps:
               try {
                   $resp = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop
               } catch {
-                  Write-Error "Failed to list pages at offset $offset : $($_.Exception.Message)"
+                  Write-Error "Failed to list pages at offset {$offset} : $($_.Exception.Message)"
                   break
               }
               if ($resp -and $resp.results) { $items = $resp.results }
@@ -148,7 +199,7 @@ steps:
 
               if ($items.Count -eq 0) { break }
               $all += $items
-              Write-Host "  Fetched page offset $offset -> items: $($items.Count) total so far: $($all.Count)"
+              Write-Host "  Fetched page offset {$offset} -> items: $($items.Count) total so far: $($all.Count)"
               $offset += $limit
           }
           return $all
