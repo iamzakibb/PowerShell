@@ -1,0 +1,272 @@
+trigger: none
+
+pool:
+    vmImage: 'windows-latest'
+
+# variables:
+#   - name: HUBSPOT_PAT
+#     value: '' # DO NOT set here; set secret in pipeline UI / variable group
+
+steps:
+  - checkout: self
+    clean: true
+
+  - task: PowerShell@2
+    displayName: 'Export HubDB tables to CSV and commit'
+    inputs:
+        targetType: 'inline'
+        pwsh: true
+        failOnStderr: false
+        script: |
+            # $token = $env:SYSTEM_ACCESSTOKEN
+            $remoteUrl = "https://anyuser:$pat@grahamsio.visualstudio.com/CN%20Website/_git/HubDB"
+
+             $pat = ${env:GIT_PAT}
+             if (-not $pat -or $pat.Trim().Length -eq 0) {
+                Write-Error "GIT_PAT not provided. Add secret pipeline variable 'GIT_PAT'."
+                exit 1
+                }
+                $pair = "anyuser:$pat"
+                $b64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
+                $header = "AUTHORIZATION: Basic $b64"
+                            # $repoUrl = "https://$(Build.Repository.Uri)".Replace("https://", "https://anyuser:$pat@")
+            # git remote set-url origin $repoUrl
+
+            # HubDB CSV exporter — CI/Azure DevOps friendly
+              # Expects HUBSPOT_PAT set as a pipeline secret (environment variable)
+
+              # ---------- CONFIG ----------
+              $useHapiKey   = $false
+              # $hapikey      = $env:HUBSPOT_HAPIKEY
+              $accessToken  = ${env:HUBSPOT_PAT}     # set in pipeline as secret variable
+              # Save outputs into repo workspace under 'hubdb' folder
+              $repoRoot     = $env:BUILD_SOURCESDIRECTORY
+              if (-not $repoRoot) { $repoRoot = (Get-Location).Path }    # local dev fallback
+              $outputDir    = Join-Path $repoRoot "hubdb"
+              $manifestPath = Join-Path $outputDir "hubdb_manifest.json"
+              $limitTables  = 100    # when listing tables
+              $maxRetries   = 3
+              # -----------------------------
+
+              # sanity checks
+              if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -Force | Out-Null }
+
+              # headers (token preferred)
+              $headers = @{}
+              if (-not $useHapiKey) {
+                  if (-not $accessToken -or $accessToken -match "<YOUR") {
+                      Write-Error "HUBSPOT_PAT not set in environment. Set pipeline variable HUBSPOT_PAT (secret)."; exit 1
+                  }
+                  $headers = @{ "Authorization" = "Bearer $accessToken"; "Accept" = "application/json" }
+              } else {
+                  if (-not $hapikey -or $hapikey -match "<YOUR") { Write-Error "hapikey not set or invalid."; exit 1 }
+                  $headers = @{ "Accept" = "application/json" }
+              }
+
+              # load manifest
+              $manifest = @{}
+              if (Test-Path $manifestPath) {
+                  try { $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop } catch { $manifest = @{} }
+              }
+              if (-not $manifest) { $manifest = @{} }
+
+              function Save-Manifest($m) { $m | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding UTF8 }
+
+              function Build-Url($base, $qs) {
+                  $pairs = @()
+                  if ($qs) {
+                      foreach ($k in $qs.Keys) { $pairs += "$k=$([uri]::EscapeDataString($qs[$k]))" }
+                  }
+                  if ($pairs.Count -gt 0) { $query = $pairs -join "&" } else { $query = "" }
+                  if ($useHapiKey) {
+                      if ($query -and $query.Length -gt 0) { return "$base`?$query&hapikey=$hapikey" } else { return "$base?hapikey=$hapikey" }
+                  } else {
+                      if ($query -and $query.Length -gt 0) { return "$base`?$query" } else { return $base }
+                  }
+              }
+
+              function Sanitize([string]$n) {
+                  if (-not $n) { return [guid]::NewGuid().ToString() }
+                  $invalid = [System.IO.Path]::GetInvalidFileNameChars()
+                  foreach ($c in $invalid) { $n = $n.Replace($c, "_") }
+                  $n = $n.Trim()
+                  if ($n.Length -eq 0) { $n = [guid]::NewGuid().ToString() }
+                  return $n
+              }
+
+              function Invoke-WithRetries {
+                  param([ScriptBlock]$ScriptBlock, [int]$Retries = $maxRetries)
+                  $attempt = 0
+                  while ($true) {
+                      $attempt++
+                      try { return & $ScriptBlock } catch {
+                          if ($attempt -ge $Retries) { throw $_ }
+                          Start-Sleep -Seconds (2 * $attempt)
+                      }
+                  }
+              }
+
+              # Probe listing endpoint (prefer cms v3)
+              $probeList = @(
+                  @{ name="cms v3 tables"; url="https://api.hubapi.com/cms/v3/hubdb/tables"; qs = @{ limit = $limitTables } },
+                  @{ name="legacy v2 tables"; url="https://api.hubapi.com/hubdb/api/v2/tables"; qs = @{ limit = 1 } }
+              )
+              $working = $null
+              foreach ($p in $probeList) {
+                  $url = Build-Url -base $p.url -qs $p.qs
+                  try {
+                      $resp = Invoke-WithRetries { Invoke-RestMethod -Uri $url -Headers $headers -Method Get -ErrorAction Stop }
+                      $working = $p; break
+                  } catch {
+                      Write-Warning "Probe failed for $($p.name): $($_.Exception.Message)"
+                  }
+              }
+              if (-not $working) { Write-Error "No table-list endpoint worked. Check token scopes."; exit 1 }
+
+              Write-Host "Using listing endpoint: $($working.name)"
+
+              # List all tables (offset pagination for v3) — safer loop
+              $tables = @(); $offset = 0; $maxIterations = 1000; $iteration = 0
+              do {
+                  $iteration++
+                  if ($iteration -gt $maxIterations) { Write-Warning "Reached max iterations ($maxIterations). Stopping."; break }
+                  $qs = @{ limit = $limitTables; offset = $offset }
+                  $url = Build-Url -base $working.url -qs $qs
+                  try { $resp = Invoke-WithRetries { Invoke-RestMethod -Uri $url -Headers $headers -Method Get -ErrorAction Stop } } catch {
+                      Write-Error "Failed to list tables at offset {$offset}: $($_.Exception.Message)"; break
+                  }
+                  if ($null -ne $resp -and $null -ne $resp.results) { $page = $resp.results }
+                  elseif ($null -ne $resp -and $null -ne $resp.objects) { $page = $resp.objects }
+                  elseif ($resp -is [System.Array]) { $page = $resp } else { $page = @() }
+                  if ($page.Count -eq 0) { Write-Host "No items returned at offset $offset — stopping pagination."; break }
+                  $tables += $page
+                  Write-Host ("Fetched tables offset {0} -> {1} (total so far: {2})" -f {$offset}, $page.Count, $tables.Count)
+                  # Try to read total if present
+                  $totalAvailable = $null
+                  try {
+                      if ($null -ne $resp.total) { $totalAvailable = [int]$resp.total }
+                      elseif ($null -ne $resp.paging -and $null -ne $resp.paging.total) { $totalAvailable = [int]$resp.paging.total }
+                  } catch { $totalAvailable = $null }
+                  if ($totalAvailable -and ($tables.Count -ge $totalAvailable)) { Write-Host ("Collected all tables (reported total: {0}). Stopping." -f $totalAvailable); break }
+                  $offset += $limitTables
+              } while ($true)
+
+              if ($tables.Count -eq 0) { Write-Warning "No HubDB tables found."; return }
+
+              # For each table: check manifest, call export endpoint if needed
+              $downloaded = 0; $skipped = 0
+              foreach ($t in $tables) {
+                  $tableId = $null
+                  if ($t.id) { $tableId = $t.id } elseif ($t.tableId) { $tableId = $t.tableId } elseif ($t.name) { $tableId = $t.name }
+                  if (-not $tableId) { Write-Warning "Skipping unnamed table"; continue }
+                  $friendly = $t.name
+                  if (-not $friendly) { $friendly = ("table_" + $tableId) }
+                  $friendly = Sanitize $friendly
+                  $csvName = "{0}_{1}.csv" -f $friendly, $tableId
+                  $csvPath = Join-Path $outputDir $csvName
+
+                  $remoteVersion = $null
+                  if ($t.updatedAt) { $remoteVersion = $t.updatedAt }
+                  elseif ($t.updated) { $remoteVersion = $t.updated }
+                  elseif ($t.publishedAt) { $remoteVersion = $t.publishedAt }
+
+                  $existing = $null
+                  try { $existing = $manifest.$tableId } catch { $existing = $null }
+                  if ($existing -and $remoteVersion -and ($existing.remoteVersion -eq $remoteVersion) -and (Test-Path $csvPath)) {
+                      $skipped++; Write-Host "Skipping (up-to-date): $csvName" -ForegroundColor DarkGray; continue
+                  }
+
+                  $exportBase = "https://api.hubapi.com/cms/v3/hubdb/tables/$tableId/export"
+                  $exportUrl = Build-Url -base $exportBase -qs @{ format = "CSV" }
+                  $succeeded = $false
+
+                  try {
+                      Write-Host "Exporting (published) table {$tableId} -> $csvName"
+                      # CSV-friendly headers (only for export calls)
+                      $csvHeaders = @{}
+                      if (-not $useHapiKey) { $csvHeaders["Authorization"] = "Bearer $accessToken" }
+                      $csvHeaders["Accept"] = "text/csv, application/octet-stream, */*"
+                      $csvHeaders["User-Agent"] = "hubdb-export-script/1.0"
+
+                      # no -UseBasicParsing; use pwsh on agent
+                      Invoke-WithRetries { Invoke-WebRequest -Uri $exportUrl -Headers $csvHeaders -Method Get -OutFile $csvPath -ErrorAction Stop }
+                      $succeeded = $true
+                  } catch {
+                      Write-Warning "Published export failed for {$tableId}: $($_.Exception.Message)"
+                  }
+
+                  if (-not $succeeded) {
+                      $draftExport = "https://api.hubapi.com/cms/v3/hubdb/tables/$tableId/draft/export"
+                      $draftUrl = Build-Url -base $draftExport -qs @{ format = "CSV" }
+                      try {
+                          Write-Host "Trying draft export for {$tableId} -> $csvName"
+                          $csvHeaders = @{}
+                          if (-not $useHapiKey) { $csvHeaders["Authorization"] = "Bearer $accessToken" }
+                          $csvHeaders["Accept"] = "text/csv, application/octet-stream, */*"
+                          $csvHeaders["User-Agent"] = "hubdb-export-script/1.0"
+                          Invoke-WithRetries { Invoke-WebRequest -Uri $draftUrl -Headers $csvHeaders -Method Get -OutFile $csvPath -ErrorAction Stop }
+                          $succeeded = $true
+                      } catch {
+                          Write-Warning "Draft export failed for {$tableId}: $($_.Exception.Message)"
+                      }
+                  }
+
+                  if ($succeeded -and (Test-Path $csvPath)) {
+                      Write-Host "Saved CSV: $csvPath" -ForegroundColor Green
+                      $manifest.$tableId = [ordered]@{
+                          fileName = $csvName
+                          remoteVersion = ($remoteVersion -as [string])
+                          lastDownloaded = (Get-Date).ToString("o")
+                      }
+                      Save-Manifest $manifest
+                      $downloaded++
+                  } else {
+                      Write-Warning "Failed to export table {$tableId} - no CSV saved."
+                  }
+              }
+
+              Write-Host "`nDone. CSVs saved to: $outputDir"
+              Write-Host "Downloaded: $downloaded ; Skipped: $skipped"
+              Write-Host "Manifest saved to: $manifestPath"
+
+              
+             
+                    try {
+                    git config user.name "azure-pipelines"
+                    git config user.email "ci@azuredevops"
+
+                    # Stage only the outputs (safer than --all)
+                    git add --force $outputDir $manifestPath
+
+                    $porcelain = git status --porcelain
+                    if (-not $porcelain) {
+                        Write-Host "No changes to commit."
+                    } else {
+                        git commit -m "chore: sync HubDB CSV exports - $(Get-Date -Format o)" --no-verify
+
+                        $branch = $env:BUILD_SOURCEBRANCHNAME
+                        if (-not $branch) { $branch = "main" }
+
+                        Write-Host "Pushing changes to origin/$branch using PAT header..."
+                        # Pass header for this single push (doesn't persist)
+                        $pushOutput = & git -c http.extraheader="$header" push origin HEAD:$branch 2>&1
+                        $pushOutput | ForEach-Object { Write-Host $_ }
+
+                        # Check exit code; if non-zero, fail explicitly
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "git push failed with exit code $LASTEXITCODE. Output:`n$pushOutput"
+                        } else {
+                            Write-Host "Push completed successfully."
+                        }
+                        Write-Host "Push completed."
+                    }
+                } catch {
+                    Write-Error "Git commit/push failed: $($_.Exception.Message)"
+                    throw
+                } finally {
+                    Pop-Location
+                }
+    env:
+        HUBSPOT_PAT: $(HUBSPOT_PAT)
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        GIT_PAT: $(GIT_PAT)
