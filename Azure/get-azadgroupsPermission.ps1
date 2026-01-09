@@ -5,7 +5,7 @@
 
 # Connect-AzAccount
 $PATH = (Get-Location).Path
-$groupNamePattern = "edai-pci*"  # Change this to your pattern
+$groupNamePattern = "*"  # Change this to your pattern
 
 $subscriptionId = "YOUR-SUBSCRIPTION-ID-HERE"  # Replace with your subscription ID
 # 2. Connect to Azure
