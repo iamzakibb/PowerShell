@@ -5,7 +5,7 @@
 
 # Connect-AzAccount
 $PATH = (Get-Location).Path
-$groupNamePattern = "*"  # Change this to your pattern
+$groupNamePattern = "somename*"  # Change this to your pattern
 
 $subscriptionId = "YOUR-SUBSCRIPTION-ID-HERE"  # Replace with your subscription ID
 # 2. Connect to Azure
@@ -44,7 +44,7 @@ Write-Host "Checking access in subscription: $subscriptionId`n" -ForegroundColor
 
 # 5. Find matching groups
 try {
-    $matchingGroups = @(Get-AzAdGroup -Filter "DisplayName -startswith 'edai-pci'" -ErrorAction Stop | 
+    $matchingGroups = @(Get-AzAdGroup -Filter "startsWith(DisplayName,'some-name')" -ErrorAction Stop | 
                       Where-Object {$_.DisplayName -like $groupNamePattern} |
                       Select-Object DisplayName, Id)
     
